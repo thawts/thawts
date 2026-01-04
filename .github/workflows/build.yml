@@ -32,6 +32,11 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
+      - name: Create dummy frontend assets
+        run: |
+          mkdir -p frontend/dist
+          touch frontend/dist/index.html
+
       - name: Run Tests
         run: go test -v ./...
 

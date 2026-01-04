@@ -2,7 +2,8 @@ name: Test
 
 on:
   push:
-    branches: [ "*" ]
+    branches-ignore:
+      - main
   pull_request:
     branches: [ "*" ]
 
@@ -23,6 +24,11 @@ jobs:
 
       - name: Install dependencies
         run: go mod download
+
+      - name: Create dummy frontend assets
+        run: |
+          mkdir -p frontend/dist
+          touch frontend/dist/index.html
 
       - name: Run Tests
         # Run tests for all packages
