@@ -26,8 +26,12 @@ func handleTrayClick(itemID C.int) {
 	}
 	switch itemID {
 	case 1: // Show
-		globalApp.Show()
+		go globalApp.Show()
 	case 2: // Quit
-		globalApp.Quit()
+		go globalApp.Quit()
+	case 3: // Export
+		go globalApp.ExportThoughts()
+	case 4: // Import
+		go globalApp.ImportThoughts()
 	}
 }

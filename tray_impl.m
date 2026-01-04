@@ -12,6 +12,12 @@
 - (void)onQuit:(id)sender {
   handleTrayClick(2);
 }
+- (void)onExport:(id)sender {
+  handleTrayClick(3);
+}
+- (void)onImport:(id)sender {
+  handleTrayClick(4);
+}
 @end
 
 static TrayTarget *target;
@@ -37,6 +43,22 @@ void setupTray() {
                                                keyEquivalent:@""];
     [showItem setTarget:target];
     [menu addItem:showItem];
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem *exportItem =
+        [[NSMenuItem alloc] initWithTitle:@"Export Data..."
+                                   action:@selector(onExport:)
+                            keyEquivalent:@""];
+    [exportItem setTarget:target];
+    [menu addItem:exportItem];
+
+    NSMenuItem *importItem =
+        [[NSMenuItem alloc] initWithTitle:@"Import Data..."
+                                   action:@selector(onImport:)
+                            keyEquivalent:@""];
+    [importItem setTarget:target];
+    [menu addItem:importItem];
 
     [menu addItem:[NSMenuItem separatorItem]];
 

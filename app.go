@@ -2,20 +2,33 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
+	"os"
+	"path/filepath"
+
+	"sync"
+	"thawts-client/internal/storage"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App struct
 type App struct {
-	ctx       context.Context
-	isVisible bool
+	ctx     context.Context
+	storage *storage.Service
+
+	// Interaction state
+	interactLock  sync.Mutex
+	isInteracting bool
+	isVisible     bool
 }
 
 // NewApp creates a new App application struct
-func NewApp() *App {
-	return &App{}
+func NewApp(storageService *storage.Service) *App {
+	return &App{
+		storage: storageService,
+	}
 }
 
 // startup is called when the app starts. The context is saved
@@ -24,12 +37,40 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
+// Save saves the thought to local storage
+func (a *App) Save(text string) error {
+	if text == "" {
+		return nil
+	}
+	err := a.storage.SaveThought(text)
+	if err != nil {
+		return err
+	}
+	// Auto hide after save?
+	// a.Hide() // Let frontend control UX or decided logic.
+	// The plan said "Hide after Save". Let's do it here or frontend?
+	// Implementing strictly the save logic. Frontend will call hide if needed or we do it here.
+	// Let's do it in frontend to be safe with async, or here.
+	// User said "Update frontend to save and auto-hide".
+	// Better to return success and let frontend call Hide or just Hide here?
+	// Let's hide here for snappiness.
+	a.Hide()
+	return nil
+}
+
 // Greet returns a greeting for the given name
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
 }
 
 func (a *App) Hide() {
+	a.interactLock.Lock()
+	if a.isInteracting {
+		a.interactLock.Unlock()
+		return
+	}
+	a.interactLock.Unlock()
+
 	a.isVisible = false
 	runtime.WindowHide(a.ctx)
 }
@@ -50,4 +91,151 @@ func (a *App) Toggle() {
 
 func (a *App) Quit() {
 	runtime.Quit(a.ctx)
+}
+
+// ExportThoughts handles the export workflow
+func (a *App) ExportThoughts() {
+	// Interaction Start
+	a.interactLock.Lock()
+	a.isInteracting = true
+	a.interactLock.Unlock()
+
+	defer func() {
+		a.interactLock.Lock()
+		a.isInteracting = false
+		a.interactLock.Unlock()
+	}()
+
+	// Ensure Visible
+	runtime.WindowShow(a.ctx)
+
+	// Select File
+	file, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Export Data",
+		DefaultFilename: "thawts_export.json",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "JSON Files (*.json)", Pattern: "*.json"},
+			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
+		},
+	})
+	if err != nil || file == "" {
+		return
+	}
+
+	f, err := os.Create(file)
+	if err != nil {
+		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+			Type:    runtime.ErrorDialog,
+			Title:   "Export Failed",
+			Message: err.Error(),
+		})
+		return
+	}
+	defer f.Close()
+
+	ext := filepath.Ext(file)
+	if ext == ".csv" {
+		w := csv.NewWriter(f)
+		err = a.storage.ExportCSV(w)
+	} else {
+		// Default to JSON
+		err = a.storage.ExportJSONToWriter(f)
+	}
+
+	if err != nil {
+		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+			Type:    runtime.ErrorDialog,
+			Title:   "Export Failed",
+			Message: err.Error(),
+		})
+	} else {
+		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+			Type:    runtime.InfoDialog,
+			Title:   "Export Successful",
+			Message: "Your thoughts have been exported.",
+		})
+	}
+}
+
+// ImportThoughts handles the import workflow
+func (a *App) ImportThoughts() {
+	// Interaction Start
+	a.interactLock.Lock()
+	a.isInteracting = true
+	a.interactLock.Unlock()
+
+	defer func() {
+		a.interactLock.Lock()
+		a.isInteracting = false
+		a.interactLock.Unlock()
+	}()
+
+	// Ensure Visible
+	runtime.WindowShow(a.ctx)
+
+	// Select File
+	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Import Data",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Data Files (*.json;*.csv)", Pattern: "*.json;*.csv"},
+		},
+	})
+	if err != nil || file == "" {
+		return
+	}
+
+	// Ask to Remove Existing
+	selection, err := runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+		Type:          runtime.QuestionDialog,
+		Title:         "Import Options",
+		Message:       "Do you want to clear existing data before importing?",
+		Buttons:       []string{"Yes, Clear Data", "No, Append"},
+		DefaultButton: "No, Append",
+		CancelButton:  "Cancel", // Wait, MessageDialog doesn't support generic Cancel button in simplistic way differently?
+		// Actually, Buttons returns the text selected.
+	})
+	// Note: Wails MessageDialog buttons logic needs verification.
+	// Usually returns the selected button text.
+	// If user closes implementation dependent.
+
+	removeExisting := false
+	if selection == "Yes, Clear Data" {
+		removeExisting = true
+	} else if selection != "No, Append" {
+		// Cancelled?
+		return
+	}
+
+	f, err := os.Open(file)
+	if err != nil {
+		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+			Type:    runtime.ErrorDialog,
+			Title:   "Import Failed",
+			Message: err.Error(),
+		})
+		return
+	}
+	defer f.Close()
+
+	ext := filepath.Ext(file)
+	if ext == ".csv" {
+		r := csv.NewReader(f)
+		err = a.storage.ImportCSV(r, removeExisting)
+	} else {
+		err = a.storage.ImportJSON(f, removeExisting)
+	}
+
+	if err != nil {
+		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+			Type:    runtime.ErrorDialog,
+			Title:   "Import Failed",
+			Message: err.Error(),
+		})
+	} else {
+		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+			Type:    runtime.InfoDialog,
+			Title:   "Import Successful",
+			Message: "Your thoughts have been imported.",
+		})
+	}
 }

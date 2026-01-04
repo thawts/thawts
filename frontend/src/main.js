@@ -1,5 +1,5 @@
 import './style.css';
-import {Hide} from '../wailsjs/go/main/App';
+import { Hide, Save } from '../wailsjs/go/main/App';
 
 document.querySelector('#app').innerHTML = `
     <div class="input-container">
@@ -14,10 +14,19 @@ window.addEventListener('focus', () => {
     input.focus();
 });
 
-// Hide on Esc
+// Hide on Esc, Save on Enter
 input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         Hide();
+    } else if (e.key === 'Enter') {
+        const val = input.value;
+        if (val && val.trim() !== "") {
+            Save(val).then(() => {
+                input.value = "";
+            }).catch((err) => {
+                console.error("Failed to save:", err);
+            });
+        }
     }
 });
 
