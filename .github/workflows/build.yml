@@ -1,0 +1,63 @@
+name: Build
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run Tests
+        run: go test -v ./...
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            wails build -platform darwin/universal
+          else
+            wails build -platform windows/amd64
+          fi
+        shell: bash
+
+      # macOS Artifact
+      - name: Upload Artifact (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: thawts-mac-universal
+          path: build/bin/thawts.app
+          retention-days: 3
+
+      # Windows Artifact
+      - name: Upload Artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: thawts-windows
+          path: build/bin/thawts.exe
+          retention-days: 3
