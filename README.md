@@ -48,14 +48,14 @@ To build the production application (macOS .app bundle):
 wails build
 ```
 
-The output will be located in `build/bin/thawts-client.app`.
+The output will be located in `build/bin/thawts.app`.
 
 ### Running the Production Build
 
 To experience the "Agent Mode" (hidden dock) and System Tray features correctly, run the built bundle:
 
 ```bash
-open build/bin/thawts-client.app
+open build/bin/thawts.app
 ```
 
 ## Configuration
