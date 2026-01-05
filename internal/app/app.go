@@ -22,6 +22,14 @@ type App struct {
 	interactLock  sync.Mutex
 	isInteracting bool
 	isVisible     bool
+
+	// Test mode (to skip runtime calls)
+	testMode bool
+}
+
+// SetTestMode enables or disables test mode
+func (a *App) SetTestMode(enabled bool) {
+	a.testMode = enabled
 }
 
 // NewApp creates a new App application struct
@@ -60,6 +68,10 @@ func (a *App) Greet(name string) string {
 }
 
 func (a *App) Hide() {
+	if a.testMode {
+		a.isVisible = false
+		return
+	}
 	a.interactLock.Lock()
 	if a.isInteracting {
 		a.interactLock.Unlock()
@@ -72,6 +84,10 @@ func (a *App) Hide() {
 }
 
 func (a *App) Show() {
+	if a.testMode {
+		a.isVisible = true
+		return
+	}
 	a.isVisible = true
 	runtime.WindowShow(a.ctx)
 	runtime.WindowSetAlwaysOnTop(a.ctx, true)
@@ -86,6 +102,9 @@ func (a *App) Toggle() {
 }
 
 func (a *App) Quit() {
+	if a.testMode {
+		return
+	}
 	runtime.Quit(a.ctx)
 }
 
@@ -103,9 +122,16 @@ func (a *App) ExportThoughts() {
 	}()
 
 	// Ensure Visible
-	runtime.WindowShow(a.ctx)
+	if !a.testMode {
+		runtime.WindowShow(a.ctx)
+	}
 
 	// Select File
+	if a.testMode {
+		// Mock file selection in test mode if needed, or just return/error
+		// For now, let's just return to avoid runtime panic
+		return
+	}
 	file, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Export Data",
 		DefaultFilename: "thawts_export.json",
@@ -167,9 +193,14 @@ func (a *App) ImportThoughts() {
 	}()
 
 	// Ensure Visible
-	runtime.WindowShow(a.ctx)
+	if !a.testMode {
+		runtime.WindowShow(a.ctx)
+	}
 
 	// Select File
+	if a.testMode {
+		return
+	}
 	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Import Data",
 		Filters: []runtime.FileFilter{

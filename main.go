@@ -51,19 +51,30 @@ func main() {
 
 	// Edit Menu (Standard)
 	EditMenu := appMenu.AddSubmenu("Edit")
-	// application.Context() is not exposed. Let's fix app.go to expose context access or just pass it in startup?
-	// Wait, app.go has Quit() method.
-	// But runtime.WindowExecJS needs context.
-	// We need to Expose Context() in app.go or use application.Context() if we add it.
+	EditMenu.AddText("Undo", keys.CmdOrCtrl("z"), func(_ *menu.CallbackData) {
+		runtime.WindowExecJS(application.Context(), "document.execCommand('undo')")
+	})
+	EditMenu.AddText("Redo", keys.CmdOrCtrl("y"), func(_ *menu.CallbackData) {
+		runtime.WindowExecJS(application.Context(), "document.execCommand('redo')")
+	})
+	EditMenu.AddSeparator()
+	EditMenu.AddText("Cut", keys.CmdOrCtrl("x"), func(_ *menu.CallbackData) { runtime.WindowExecJS(application.Context(), "document.execCommand('cut')") })
+	EditMenu.AddText("Copy", keys.CmdOrCtrl("c"), func(_ *menu.CallbackData) {
+		runtime.WindowExecJS(application.Context(), "document.execCommand('copy')")
+	})
+	EditMenu.AddText("Paste", keys.CmdOrCtrl("v"), func(_ *menu.CallbackData) {
+		runtime.WindowExecJS(application.Context(), "document.execCommand('paste')")
+	})
+	EditMenu.AddText("Select All", keys.CmdOrCtrl("a"), func(_ *menu.CallbackData) {
+		runtime.WindowExecJS(application.Context(), "document.execCommand('selectAll')")
+	})
 
-	// Let's modify app.go to export Context() or just use app.Ctx.
-	// Re-reading app.go content I wrote:
-	// func (a *App) Startup(ctx context.Context) { a.ctx = ctx }
-	// Context is private `ctx`.
-	// I should add a method `Context()` to `internal/app/app.go` or just make `Ctx` public.
-	// Adding `Context()` getter is cleaner.
-
-	// Let's assume I fix app.go first.
-
-	// ... (Rest of main.go)
+	// Data Menu
+	DataMenu := appMenu.AddSubmenu("Data")
+	DataMenu.AddText("Export Data...", nil, func(_ *menu.CallbackData) {
+		application.ExportThoughts()
+	})
+	DataMenu.AddText("Import Data...", nil, func(_ *menu.CallbackData) {
+		application.ImportThoughts()
+	})
 }
