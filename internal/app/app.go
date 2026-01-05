@@ -89,6 +89,8 @@ func (a *App) Show() {
 		return
 	}
 	a.isVisible = true
+	// Force unminimise/restore logic for Windows to ensure it grabs attention
+	runtime.WindowUnminimise(a.ctx)
 	runtime.WindowShow(a.ctx)
 	runtime.WindowSetAlwaysOnTop(a.ctx, true)
 	// Emit event for frontend to focus input
