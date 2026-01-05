@@ -131,10 +131,7 @@ func main() {
 				}
 			}()
 		},
-			OnClicked: func(_ *menu.CallbackData) {
-				app.Toggle()
-			},
-		},
+
 		Bind: []interface{}{
 			app,
 		},
