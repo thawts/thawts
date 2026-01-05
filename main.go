@@ -71,6 +71,22 @@ func main() {
 	DataMenu.AddText("Import Data...", nil, func(_ *menu.CallbackData) {
 		app.ImportThoughts()
 	})
+	// Tray Menu
+	trayMenu := menu.NewMenu()
+	trayMenu.AddText("Show Thawts", nil, func(_ *menu.CallbackData) {
+		app.Show()
+	})
+	trayMenu.AddSeparator()
+	trayMenu.AddText("Export Data...", nil, func(_ *menu.CallbackData) {
+		app.ExportThoughts()
+	})
+	trayMenu.AddText("Import Data...", nil, func(_ *menu.CallbackData) {
+		app.ImportThoughts()
+	})
+	trayMenu.AddSeparator()
+	trayMenu.AddText("Quit", nil, func(_ *menu.CallbackData) {
+		runtime.Quit(app.ctx)
+	})
 
 	// Create application with options
 	err = wails.Run(&options.App{
@@ -80,6 +96,12 @@ func main() {
 		Frameless:   true,
 		AlwaysOnTop: true,
 		Menu:        appMenu,
+		SystemTray: &options.SystemTray{
+			Menu: trayMenu,
+			OnClicked: func(_ *menu.CallbackData) {
+				app.Toggle()
+			},
+		},
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
@@ -88,9 +110,8 @@ func main() {
 			app.startup(ctx)
 			runtime.WindowHide(ctx)
 
-			// Init Tray
-			RegisterApp(app)
-			InitTray()
+			// Init Key Bindings
+			// Tray is handled by options now
 
 			// Register hotkey: Ctrl+Shift+Space
 			// Mods: Ctrl (Command/Meta), Shift
@@ -109,6 +130,10 @@ func main() {
 					app.Toggle()
 				}
 			}()
+		},
+			OnClicked: func(_ *menu.CallbackData) {
+				app.Toggle()
+			},
 		},
 		Bind: []interface{}{
 			app,

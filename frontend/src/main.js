@@ -33,8 +33,21 @@ input.addEventListener('keydown', (e) => {
 // Hide on Blur
 // Note: In Wails, blurring the window might need backend coordination, 
 // but 'blur' event on window often works for webview focus loss.
+// Hide on Blur with Debounce
+// This prevents immediate hiding if focus is lost momentarily (e.g. during window transition)
+let hideTimeout;
 window.addEventListener('blur', () => {
-    Hide();
+    hideTimeout = setTimeout(() => {
+        Hide();
+    }, 200); // 200ms grace period
+});
+
+window.addEventListener('focus', () => {
+    if (hideTimeout) {
+        clearTimeout(hideTimeout);
+        hideTimeout = null;
+    }
+    input.focus();
 });
 
 // Initial focus
