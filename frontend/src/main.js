@@ -10,8 +10,12 @@ document.querySelector('#app').innerHTML = `
 const input = document.getElementById('search-input');
 
 // Focus handling
-window.addEventListener('focus', () => {
+window.focusInput = function () {
     input.focus();
+};
+
+window.addEventListener('focus', () => {
+    window.focusInput();
 });
 
 // Hide on Esc, Save on Enter

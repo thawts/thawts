@@ -91,6 +91,7 @@ func (a *App) Show() {
 	a.isVisible = true
 	runtime.WindowShow(a.ctx)
 	runtime.WindowSetAlwaysOnTop(a.ctx, true)
+	runtime.WindowExecJS(a.ctx, "window.focusInput && window.focusInput()")
 }
 
 func (a *App) Toggle() {
