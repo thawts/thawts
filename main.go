@@ -1,17 +1,25 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"log"
 	"os"
 	"path/filepath"
 
+	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/menu/keys"
+	"github.com/wailsapp/wails/v2/pkg/options"
+	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"thawts-client/internal/app"
 	"thawts-client/internal/storage"
+	"thawts-client/internal/tray"
+
+	"golang.design/x/hotkey"
 )
 
 //go:embed all:frontend/dist
@@ -77,4 +85,50 @@ func main() {
 	DataMenu.AddText("Import Data...", nil, func(_ *menu.CallbackData) {
 		application.ImportThoughts()
 	})
+	// Create application with options
+	err = wails.Run(&options.App{
+		Title:       "thawts-client",
+		Width:       800,
+		Height:      60,
+		Frameless:   true,
+		AlwaysOnTop: true,
+		Menu:        appMenu,
+		AssetServer: &assetserver.Options{
+			Assets: assets,
+		},
+		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
+		OnStartup: func(ctx context.Context) {
+			application.Startup(ctx)
+			runtime.WindowHide(ctx)
+
+			// Init Tray
+			tray.RegisterApp(application)
+			tray.InitTray()
+
+			// Register hotkey: Ctrl+Shift+Space
+			go func() {
+				hk := hotkey.New([]hotkey.Modifier{hotkey.ModCtrl, hotkey.ModShift}, hotkey.KeySpace)
+				if err := hk.Register(); err != nil {
+					log.Println("failed to register hotkey:", err)
+					return
+				}
+				for range hk.Keydown() {
+					application.Toggle()
+				}
+			}()
+		},
+		Bind: []interface{}{
+			application,
+		},
+		Mac: &mac.Options{
+			TitleBar:             mac.TitleBarHiddenInset(),
+			Appearance:           mac.NSAppearanceNameDarkAqua,
+			WebviewIsTransparent: true,
+			WindowIsTranslucent:  true,
+		},
+	})
+
+	if err != nil {
+		println("Error:", err.Error())
+	}
 }
