@@ -126,6 +126,12 @@ func main() {
 			WebviewIsTransparent: true,
 			WindowIsTranslucent:  true,
 		},
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId: "e1db439e-43e1-4119-880e-37e47522e90d",
+			OnSecondInstanceLaunch: func(secondInstanceData options.SecondInstanceData) {
+				application.Show()
+			},
+		},
 	})
 
 	if err != nil {
