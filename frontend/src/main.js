@@ -1,5 +1,5 @@
 import './style.css';
-import { Hide, Save } from '../wailsjs/go/main/App';
+import { Hide, Save } from '../wailsjs/go/app/App';
 
 document.querySelector('#app').innerHTML = `
     <div class="input-container">

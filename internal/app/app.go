@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -31,10 +31,14 @@ func NewApp(storageService *storage.Service) *App {
 	}
 }
 
-// startup is called when the app starts. The context is saved
+// Startup is called when the app starts. The context is saved
 // so we can call the runtime methods
-func (a *App) startup(ctx context.Context) {
+func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+func (a *App) Context() context.Context {
+	return a.ctx
 }
 
 // Save saves the thought to local storage
@@ -46,14 +50,6 @@ func (a *App) Save(text string) error {
 	if err != nil {
 		return err
 	}
-	// Auto hide after save?
-	// a.Hide() // Let frontend control UX or decided logic.
-	// The plan said "Hide after Save". Let's do it here or frontend?
-	// Implementing strictly the save logic. Frontend will call hide if needed or we do it here.
-	// Let's do it in frontend to be safe with async, or here.
-	// User said "Update frontend to save and auto-hide".
-	// Better to return success and let frontend call Hide or just Hide here?
-	// Let's hide here for snappiness.
 	a.Hide()
 	return nil
 }
@@ -191,12 +187,8 @@ func (a *App) ImportThoughts() {
 		Message:       "Do you want to clear existing data before importing?",
 		Buttons:       []string{"Yes, Clear Data", "No, Append"},
 		DefaultButton: "No, Append",
-		CancelButton:  "Cancel", // Wait, MessageDialog doesn't support generic Cancel button in simplistic way differently?
-		// Actually, Buttons returns the text selected.
+		CancelButton:  "Cancel",
 	})
-	// Note: Wails MessageDialog buttons logic needs verification.
-	// Usually returns the selected button text.
-	// If user closes implementation dependent.
 
 	removeExisting := false
 	if selection == "Yes, Clear Data" {
