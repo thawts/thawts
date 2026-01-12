@@ -25,6 +25,9 @@ type App struct {
 
 	// Test mode (to skip runtime calls)
 	testMode bool
+
+	// Configuration
+	showRecent bool
 }
 
 // SetTestMode enables or disables test mode
@@ -34,8 +37,13 @@ func (a *App) SetTestMode(enabled bool) {
 
 // NewApp creates a new App application struct
 func NewApp(storageService *storage.Service) *App {
+	// Load config
+	val, _ := storageService.GetMetadata("show_recent")
+	showRecent := val == "true" // Default false if missing or error
+
 	return &App{
-		storage: storageService,
+		storage:    storageService,
+		showRecent: showRecent,
 	}
 }
 
@@ -54,6 +62,24 @@ func (a *App) Save(text string) error {
 	if text == "" {
 		return nil
 	}
+
+	// Helper for config
+	if len(text) > 8 && text[:8] == "/config " {
+		// Parse config
+		// For now only "show-recent true/false"
+		if text == "/config show-recent true" {
+			a.showRecent = true
+			a.storage.SetMetadata("show_recent", "true")
+			return nil
+		} else if text == "/config show-recent false" {
+			a.showRecent = false
+			a.storage.SetMetadata("show_recent", "false")
+			return nil
+		}
+		// Unknown config
+		return fmt.Errorf("unknown config command")
+	}
+
 	err := a.storage.SaveThought(text)
 	if err != nil {
 		return err
@@ -115,6 +141,13 @@ func (a *App) Quit() {
 // Search returns thoughts matching the query
 func (a *App) Search(query string) []storage.Thought {
 	if query == "" {
+		if a.showRecent {
+			thoughts, err := a.storage.GetRecentThoughts(20)
+			if err != nil {
+				return nil
+			}
+			return thoughts
+		}
 		return nil
 	}
 	thoughts, err := a.storage.SearchThoughts(query)

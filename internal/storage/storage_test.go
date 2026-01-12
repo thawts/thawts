@@ -186,3 +186,88 @@ func TestSearchThoughts(t *testing.T) {
 		t.Errorf("Expected 0 results, got %d", len(results))
 	}
 }
+
+// TestGetRecentThoughts tests fetching recent thoughts
+func TestGetRecentThoughts(t *testing.T) {
+	tmpDB := filepath.Join(t.TempDir(), "test_recent.db")
+	service, err := NewService(tmpDB)
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+	defer service.Close()
+
+	// Seed data
+	thoughts := []string{
+		"Thought 1",
+		"Thought 2",
+		"Thought 3",
+	}
+	for _, thought := range thoughts {
+		if err := service.SaveThought(thought); err != nil {
+			t.Fatalf("Failed to save thought: %v", err)
+		}
+	}
+
+	// Fetch recent 2
+	recent, err := service.GetRecentThoughts(2)
+	if err != nil {
+		t.Fatalf("GetRecentThoughts failed: %v", err)
+	}
+
+	if len(recent) != 2 {
+		t.Errorf("Expected 2 recent thoughts, got %d", len(recent))
+	}
+
+	// Should be ordered by created_at DESC, so Thought 3 first
+	if recent[0].Content != "Thought 3" {
+		t.Errorf("Expected 'Thought 3' as first recent thought, got '%s'", recent[0].Content)
+	}
+	if recent[1].Content != "Thought 2" {
+		t.Errorf("Expected 'Thought 2' as second recent thought, got '%s'", recent[1].Content)
+	}
+}
+
+// TestMetadata tests metadata operations
+func TestMetadata(t *testing.T) {
+	tmpDB := filepath.Join(t.TempDir(), "test_metadata.db")
+	service, err := NewService(tmpDB)
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+	defer service.Close()
+
+	// Test Set
+	if err := service.SetMetadata("test_key", "test_value"); err != nil {
+		t.Fatalf("SetMetadata failed: %v", err)
+	}
+
+	// Test Get
+	val, err := service.GetMetadata("test_key")
+	if err != nil {
+		t.Fatalf("GetMetadata failed: %v", err)
+	}
+	if val != "test_value" {
+		t.Errorf("Expected 'test_value', got '%s'", val)
+	}
+
+	// Test Update
+	if err := service.SetMetadata("test_key", "updated_value"); err != nil {
+		t.Fatalf("SetMetadata (update) failed: %v", err)
+	}
+	val, err = service.GetMetadata("test_key")
+	if err != nil {
+		t.Fatalf("GetMetadata failed: %v", err)
+	}
+	if val != "updated_value" {
+		t.Errorf("Expected 'updated_value', got '%s'", val)
+	}
+
+	// Test Non-existent
+	val, err = service.GetMetadata("missing_key")
+	if err != nil {
+		t.Fatalf("GetMetadata (missing) failed: %v", err)
+	}
+	if val != "" {
+		t.Errorf("Expected empty string for missing key, got '%s'", val)
+	}
+}

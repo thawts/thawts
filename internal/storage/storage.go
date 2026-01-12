@@ -310,3 +310,38 @@ func (s *Service) SearchThoughts(query string) ([]Thought, error) {
 	}
 	return thoughts, nil
 }
+
+// SetMetadata sets a metadata key-value pair
+func (s *Service) SetMetadata(key, value string) error {
+	_, err := s.db.Exec("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", key, value)
+	return err
+}
+
+// GetMetadata retrieves a metadata value by key
+func (s *Service) GetMetadata(key string) (string, error) {
+	var value string
+	err := s.db.QueryRow("SELECT value FROM metadata WHERE key = ?", key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return value, err
+}
+
+// GetRecentThoughts retrieves the most recent thoughts limited by the count
+func (s *Service) GetRecentThoughts(limit int) ([]Thought, error) {
+	rows, err := s.db.Query("SELECT id, content, created_at FROM thoughts ORDER BY created_at DESC LIMIT ?", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var thoughts []Thought
+	for rows.Next() {
+		var t Thought
+		if err := rows.Scan(&t.ID, &t.Content, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		thoughts = append(thoughts, t)
+	}
+	return thoughts, nil
+}
