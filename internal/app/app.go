@@ -58,7 +58,7 @@ func (a *App) Save(text string) error {
 	if err != nil {
 		return err
 	}
-	a.Hide()
+	// a.Hide() - User wants app to stay open for multiple entries
 	return nil
 }
 

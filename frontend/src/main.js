@@ -3,7 +3,7 @@ import { Hide, Save, Search, SetWindowHeight } from '../wailsjs/go/app/App';
 
 document.querySelector('#app').innerHTML = `
     <div class="input-container">
-        <input id="search-input" type="text" placeholder="Type a command..." autofocus />
+        <input id="search-input" type="text" placeholder="Type what's on your mind..." autofocus />
         <div id="suggestions" class="suggestions-container"></div>
     </div>
 `;
