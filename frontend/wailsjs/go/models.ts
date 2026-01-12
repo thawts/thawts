@@ -5,6 +5,7 @@ export namespace storage {
 	    content: string;
 	    // Go type: time
 	    created_at: any;
+	    tags: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Thought(source);
@@ -15,6 +16,7 @@ export namespace storage {
 	        this.id = source["id"];
 	        this.content = source["content"];
 	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.tags = source["tags"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

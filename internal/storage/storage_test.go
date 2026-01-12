@@ -19,10 +19,10 @@ func TestService_Workflow(t *testing.T) {
 	defer s.Close()
 
 	// 2. Save
-	if err := s.SaveThought("Hello World"); err != nil {
+	if _, err := s.SaveThought("Hello World"); err != nil {
 		t.Fatalf("SaveThought failed: %v", err)
 	}
-	if err := s.SaveThought("Second Thought"); err != nil {
+	if _, err := s.SaveThought("Second Thought"); err != nil {
 		t.Fatalf("SaveThought failed: %v", err)
 	}
 
@@ -137,7 +137,7 @@ func TestSearchThoughts(t *testing.T) {
 	}
 
 	for _, thought := range thoughts {
-		if err := service.SaveThought(thought); err != nil {
+		if _, err := service.SaveThought(thought); err != nil {
 			t.Fatalf("Failed to save thought: %v", err)
 		}
 	}
@@ -203,7 +203,7 @@ func TestGetRecentThoughts(t *testing.T) {
 		"Thought 3",
 	}
 	for _, thought := range thoughts {
-		if err := service.SaveThought(thought); err != nil {
+		if _, err := service.SaveThought(thought); err != nil {
 			t.Fatalf("Failed to save thought: %v", err)
 		}
 	}

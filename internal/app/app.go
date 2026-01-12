@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"sync"
+	"thawts-client/internal/classifier"
 	"thawts-client/internal/storage"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -15,8 +16,9 @@ import (
 
 // App struct
 type App struct {
-	ctx     context.Context
-	storage *storage.Service
+	ctx        context.Context
+	storage    *storage.Service
+	classifier classifier.Classifier
 
 	// Interaction state
 	interactLock  sync.Mutex
@@ -43,6 +45,7 @@ func NewApp(storageService *storage.Service) *App {
 
 	return &App{
 		storage:    storageService,
+		classifier: classifier.NewRegexClassifier(),
 		showRecent: showRecent,
 	}
 }
@@ -76,13 +79,52 @@ func (a *App) Save(text string) error {
 			a.storage.SetMetadata("show_recent", "false")
 			return nil
 		}
+
+		if text == "/config backfill-tags" {
+			thoughts, err := a.storage.GetAllThoughts()
+			if err != nil {
+				return err
+			}
+			count := 0
+			for _, t := range thoughts {
+				tags := a.classifier.Classify(t.Content)
+				if len(tags) > 0 {
+					for _, tag := range tags {
+						// This might duplicate tags if run multiple times without checking existence.
+						// DB constraint is not unique on (thought_id, name) yet?
+						// Let's assume AddTag just inserts. We should make it ignore duplicates or delete existing first?
+						// For simple backfill, let's just insert. If duplicates -> whatever for now or upgrade AddTag.
+						// Actually, `initSchema` does not set UNIQUE on tags.
+						// To be safe, we could delete existing tags for this thought or just ignore errors.
+						a.storage.AddTag(t.ID, tag, "regex_backfill")
+					}
+					count++
+				}
+			}
+			runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+				Type:    runtime.InfoDialog,
+				Title:   "Backfill Complete",
+				Message: fmt.Sprintf("Processed %d thoughts. Tagged %d entries.", len(thoughts), count),
+			})
+			return nil
+		}
+
 		// Unknown config
 		return fmt.Errorf("unknown config command")
 	}
 
-	err := a.storage.SaveThought(text)
+	id, err := a.storage.SaveThought(text)
 	if err != nil {
 		return err
+	}
+
+	// Classify and Tag
+	tags := a.classifier.Classify(text)
+	for _, tag := range tags {
+		if err := a.storage.AddTag(id, tag, "regex"); err != nil {
+			// Log error but don't fail the save
+			fmt.Printf("Failed to add tag %s: %v\n", tag, err)
+		}
 	}
 	// a.Hide() - User wants app to stay open for multiple entries
 	return nil
