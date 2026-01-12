@@ -30,8 +30,16 @@ export function Save(arg1) {
   return window['go']['app']['App']['Save'](arg1);
 }
 
+export function Search(arg1) {
+  return window['go']['app']['App']['Search'](arg1);
+}
+
 export function SetTestMode(arg1) {
   return window['go']['app']['App']['SetTestMode'](arg1);
+}
+
+export function SetWindowHeight(arg1) {
+  return window['go']['app']['App']['SetWindowHeight'](arg1);
 }
 
 export function Show() {

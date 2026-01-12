@@ -112,6 +112,28 @@ func (a *App) Quit() {
 	runtime.Quit(a.ctx)
 }
 
+// Search returns thoughts matching the query
+func (a *App) Search(query string) []storage.Thought {
+	if query == "" {
+		return nil
+	}
+	thoughts, err := a.storage.SearchThoughts(query)
+	if err != nil {
+		// Log error if needed, but for now just return nil/empty
+		return nil
+	}
+	return thoughts
+}
+
+// SetWindowHeight sets the window height
+func (a *App) SetWindowHeight(height int) {
+	if a.testMode {
+		return
+	}
+	width, _ := runtime.WindowGetSize(a.ctx)
+	runtime.WindowSetSize(a.ctx, width, height)
+}
+
 // ExportThoughts handles the export workflow
 func (a *App) ExportThoughts() {
 	// Interaction Start

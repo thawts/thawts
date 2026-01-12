@@ -290,3 +290,23 @@ func (s *Service) ImportJSON(r io.Reader, removeExisting bool) error {
 	}
 	return tx.Commit()
 }
+
+// SearchThoughts finds thoughts containing the query string
+func (s *Service) SearchThoughts(query string) ([]Thought, error) {
+	// Simple partial match
+	rows, err := s.db.Query("SELECT id, content, created_at FROM thoughts WHERE content LIKE ? ORDER BY created_at DESC LIMIT 5", "%"+query+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var thoughts []Thought
+	for rows.Next() {
+		var t Thought
+		if err := rows.Scan(&t.ID, &t.Content, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		thoughts = append(thoughts, t)
+	}
+	return thoughts, nil
+}

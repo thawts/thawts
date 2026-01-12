@@ -1,11 +1,4 @@
-:root {
-    --bg-color: #1a1a1a;
-    --text-color: #ffffff;
-    --input-bg: rgba(255, 255, 255, 0.1);
-    --placeholder-color: rgba(255, 255, 255, 0.5);
-    --border-radius: 12px;
-}
-
+/* Basic Clean Reset */
 * {
     box-sizing: border-box;
     margin: 0;
@@ -15,46 +8,95 @@
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background-color: transparent;
-    color: var(--text-color);
-    overflow: hidden;
-    height: 100vh;
+    color: #ffffff;
     display: flex;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
+    padding-top: 0;
+    padding: 10px;
+    /* Small outer padding for shadow/glow */
+    overflow: hidden;
 }
 
 #app {
     width: 100%;
-    height: 100%;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    /* Simulate the window frame/background if frameless doesn't handle whole rect */
-    background: rgba(27, 27, 27, 0.95); 
-    border-radius: var(--border-radius);
+    max-width: 800px;
+    background: #000000;
+    /* Pitch black */
+    border-radius: 12px;
+    border: 1px solid #111;
+    /* Extremely subtle border */
     overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
 
 .input-container {
     width: 100%;
-    padding: 0 20px;
-    display: flex;
-    align-items: center;
+    position: relative;
 }
 
-input {
+input[type="text"] {
     width: 100%;
-    background: transparent;
+    padding: 18px 24px;
+    font-size: 20px;
     border: none;
+    border-radius: 0;
+    background-color: transparent;
+    color: #ffffff;
     outline: none;
-    color: var(--text-color);
-    font-size: 24px;
-    padding: 16px 0;
     font-weight: 300;
 }
 
-input::placeholder {
-    color: var(--placeholder-color);
+input[type="text"]::placeholder {
+    color: #333;
+    /* Darker placeholder */
+    font-weight: 300;
+}
+
+/* Suggestions using a separator line instead of distinct boxes */
+.suggestions-container {
+    display: none;
+    border-top: 1px solid #111;
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+.suggestions-list {
+    list-style: none;
+}
+
+.suggestion-item {
+    padding: 12px 24px;
+    font-size: 16px;
+    color: #666;
+    cursor: default;
+    transition: background-color 0.1s, color 0.1s;
+}
+
+.suggestion-item:hover {
+    background-color: #0a0a0a;
+    color: #ccc;
+}
+
+.highlight {
+    color: #fff;
+    font-weight: 500;
+    text-shadow: 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+/* Scrollbar styling for webkit */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #222;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #333;
 }

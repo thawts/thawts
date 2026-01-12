@@ -121,10 +121,10 @@ func main() {
 			application,
 		},
 		Mac: &mac.Options{
-			TitleBar:             mac.TitleBarHiddenInset(),
+			TitleBar:             mac.TitleBarHidden(),
 			Appearance:           mac.NSAppearanceNameDarkAqua,
 			WebviewIsTransparent: true,
-			WindowIsTranslucent:  true,
+			WindowIsTranslucent:  false, // Disable translucency for pitch black
 		},
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: "e1db439e-43e1-4119-880e-37e47522e90d",

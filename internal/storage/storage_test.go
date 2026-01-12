@@ -119,3 +119,70 @@ Appended Thought,2023-01-02T00:00:00Z
 		t.Errorf("Expected 2 thoughts (1 old + 1 new), got %d", count)
 	}
 }
+
+func TestSearchThoughts(t *testing.T) {
+	tmpDB := filepath.Join(t.TempDir(), "test_search.db")
+	service, err := NewService(tmpDB)
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+	defer service.Close()
+
+	// Seed data
+	thoughts := []string{
+		"Hello World",
+		"Another thought",
+		"World is big",
+		"Golang is great",
+	}
+
+	for _, thought := range thoughts {
+		if err := service.SaveThought(thought); err != nil {
+			t.Fatalf("Failed to save thought: %v", err)
+		}
+	}
+
+	// Test Search "World"
+	results, err := service.SearchThoughts("World")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Errorf("Expected 2 results for 'World', got %d", len(results))
+	}
+
+	// Check content
+	foundHello := false
+	foundBig := false
+	for _, r := range results {
+		if strings.Contains(r.Content, "Hello World") {
+			foundHello = true
+		}
+		if strings.Contains(r.Content, "World is big") {
+			foundBig = true
+		}
+	}
+
+	if !foundHello || !foundBig {
+		t.Errorf("Search results missing expected content. Got: %v", results)
+	}
+
+	// Test case insensitive (SQLite LIKE is case insensitive by default for ASCII)
+	results, err = service.SearchThoughts("world")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("Expected 2 results for 'world' (case insensitive), got %d", len(results))
+	}
+
+	// Test no match
+	results, err = service.SearchThoughts("NonExistent")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results, got %d", len(results))
+	}
+}
