@@ -1,14 +1,32 @@
 # Thawts Client
 
+### Version 0.3.0
+
 Thawts Client is a minimalistic, Raycast-inspired desktop application for capturing thoughts, built with **Go (Wails)** and **Vanilla JS**.
 
 ## Features
 
-- **Global Hotkey**: Press `Ctrl+Shift+Space` to toggle the input window from anywhere.
-- **Agent Mode**: Runs in the background with no Dock icon.
+### Core Functionality
+- **Quick Capture**: Instantly capture thoughts, ideas, and tasks via a minimalist text input.
+- **Local Storage**: All data is stored locally in specific SQlite database (`~/.thawts/thawts.db`) for privacy and speed.
+- **Search**: Real-time fuzzy search across your entire history as you type.
+- **Smart Formatting**: Visualizes your thoughts with auto-highlighting of search terms.
+
+### User Interface & Experience
+- **Minimalist Design**: Sleek, high-contrast dark mode with a pitch-black background.
+- **Global Hotkey**: Press `Ctrl+Shift+Space` (or `Cmd+Shift+Space` on macOS) to toggle the input window from anywhere.
 - **System Tray**: Accessible via the menu bar icon (click to Show/Quit).
 - **Auto-Hide**: The window automatically hides when it loses focus or when `Esc` is pressed.
-- **Frameless UI**: A clean, floating input box design.
+- **Session Grouping**: Search results are visually grouped by time sessions (gaps > 30 mins).
+- **Unified Navigation**: Navigate with Arrow Up/Down or Mouse Hover seamlessly.
+
+### Automatic Intelligence
+- **Auto-Tagging**: Content is automatically analyzed and tags are applied (e.g., `TODO`, `IDEA`, `CALENDAR`).
+- **Visual Tags**: Tags appear as colored pill badges next to entries.
+
+### Advanced Commands
+- **Slash Commands**: Control the application via commands like `/config show-recent true` or `/config backfill-tags`.
+- **Autocomplete**: Intelligent command suggestions appear when typing `/`.
 
 ## Prerequisites
 
