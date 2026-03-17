@@ -3,8 +3,12 @@ package app
 
 import (
 	"context"
+	"fmt"
+	gort "runtime"
 	"log"
 	"math"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -154,6 +158,44 @@ func (a *App) classifyAsync(id int64, content string) {
 				runtime.EventsEmit(a.ctx, "mishaps:changed")
 			}
 		}
+	} else {
+		// Intent detection — only for non-mishap thoughts.
+		intents, err := a.ai.DetectIntents(content)
+		if err == nil && len(intents) > 0 {
+			now := time.Now().UTC()
+			saved := 0
+			for i, intent := range intents {
+				domainIntent := domain.Intent{
+					ID:        fmt.Sprintf("%d-%s-%d", id, intent.Type, i),
+					ThoughtID: id,
+					Type:      intent.Type,
+					Title:     intent.Description,
+					Status:    "pending",
+					CreatedAt: now,
+				}
+				if err := a.store.SaveIntent(domainIntent); err != nil {
+					log.Printf("saveIntent: %v", err)
+				} else {
+					saved++
+				}
+			}
+			if saved > 0 && !a.testMode && a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "intents:changed")
+			}
+		}
+	}
+
+	// Analyze sentiment and store.
+	sentimentCtx, cancelSentiment := context.WithTimeout(ctx, 2*time.Second)
+	defer cancelSentiment()
+	if score, err := a.ai.AnalyzeSentiment(sentimentCtx, content); err != nil {
+		log.Printf("analyzeSentiment %d: %v", id, err)
+	} else {
+		if err := a.store.StoreSentiment(id, score); err != nil {
+			log.Printf("storeSentiment %d: %v", id, err)
+		} else {
+			a.checkWellbeingTrend()
+		}
 	}
 
 	// Embed the thought and store the vector for future semantic search.
@@ -171,6 +213,20 @@ func (a *App) classifyAsync(id int64, content string) {
 	// Notify the frontend that the thought has been enriched.
 	if !a.testMode && a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "thought:classified", id)
+	}
+}
+
+// checkWellbeingTrend computes the 7-day rolling sentiment average and emits
+// a wellbeing:alert event when it falls below the burnout threshold (−0.4).
+func (a *App) checkWellbeingTrend() {
+	avg, err := a.GetSentimentTrend(7)
+	if err != nil || avg == 0 {
+		return
+	}
+	if avg < -0.4 {
+		if !a.testMode && a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "wellbeing:alert", avg)
+		}
 	}
 }
 
@@ -246,10 +302,7 @@ func (a *App) SemanticSearch(query string) ([]*domain.Thought, error) {
 		}
 	}
 
-	limit := 20
-	if len(results) < limit {
-		limit = len(results)
-	}
+	limit := min(20, len(results))
 	out := make([]*domain.Thought, limit)
 	for i := range out {
 		out[i] = results[i].thought
@@ -295,6 +348,30 @@ func (a *App) GetThought(id int64) (*domain.Thought, error) {
 	return a.store.GetThought(id)
 }
 
+// MergeThoughts combines multiple thoughts into one, soft-deleting the originals.
+func (a *App) MergeThoughts(ids []int64) (*domain.Thought, error) {
+	merged, err := a.store.MergeThoughts(ids)
+	if err != nil {
+		return nil, err
+	}
+	if !a.testMode && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "thoughts:merged")
+	}
+	return merged, nil
+}
+
+// CleanText returns a typo-corrected version of the thought's content for
+// display purposes only. The original content is never modified.
+func (a *App) CleanText(id int64) (string, error) {
+	thought, err := a.store.GetThought(id)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return a.ai.CleanText(ctx, thought.Content)
+}
+
 // --- Mishap / "Review Needed" bin ---
 
 // GetHiddenThoughts returns thoughts flagged as mishaps, awaiting user review.
@@ -305,6 +382,93 @@ func (a *App) GetHiddenThoughts() ([]*domain.Thought, error) {
 // UnhideThought moves a thought out of the mishap bin and removes the mishap tag.
 func (a *App) UnhideThought(id int64) error {
 	return a.store.UnhideThought(id)
+}
+
+// --- Intent Actions ---
+
+// GetPendingIntents returns all intents awaiting user confirmation.
+func (a *App) GetPendingIntents() ([]domain.Intent, error) {
+	return a.store.GetPendingIntents()
+}
+
+// ConfirmIntent marks an intent as confirmed and attempts to create a native
+// calendar or reminder entry using AppleScript (macOS only, best-effort).
+func (a *App) ConfirmIntent(intentID string) error {
+	if err := a.store.ConfirmIntent(intentID); err != nil {
+		return err
+	}
+	// Best-effort: create native calendar/reminder entry.
+	intent, err := a.store.GetIntent(intentID)
+	if err == nil {
+		go a.createNativeEvent(intent)
+	}
+	if !a.testMode && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "intents:changed")
+	}
+	return nil
+}
+
+// DismissIntent marks an intent as dismissed.
+func (a *App) DismissIntent(intentID string) error {
+	if err := a.store.DismissIntent(intentID); err != nil {
+		return err
+	}
+	if !a.testMode && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "intents:changed")
+	}
+	return nil
+}
+
+// createNativeEvent creates a native calendar or reminder entry via AppleScript
+// on macOS. This is a best-effort operation; errors are logged but not surfaced.
+func (a *App) createNativeEvent(intent *domain.Intent) {
+	if gort.GOOS != "darwin" {
+		return
+	}
+	// Sanitise title for AppleScript: escape double quotes.
+	title := strings.ReplaceAll(intent.Title, `"`, `'`)
+
+	var script string
+	switch intent.Type {
+	case "calendar":
+		script = fmt.Sprintf(`tell application "Calendar"
+			tell calendar "Calendar"
+				make new event at end of events with properties {summary:"%s"}
+			end tell
+		end tell`, title)
+	case "task", "reminder":
+		script = fmt.Sprintf(`tell application "Reminders"
+			tell list "Reminders"
+				make new reminder with properties {name:"%s"}
+			end tell
+		end tell`, title)
+	default:
+		return
+	}
+
+	cmd := exec.Command("osascript", "-e", script)
+	if err := cmd.Run(); err != nil {
+		log.Printf("createNativeEvent %q: %v", intent.Title, err)
+	}
+}
+
+// --- Wellbeing ---
+
+// GetSentimentTrend returns the rolling average sentiment score over the last
+// `days` days. Returns 0 when no signals are recorded.
+func (a *App) GetSentimentTrend(days int) (float32, error) {
+	if days <= 0 {
+		days = 7
+	}
+	signals, err := a.store.GetSentimentTrend(days)
+	if err != nil || len(signals) == 0 {
+		return 0, err
+	}
+	var sum float32
+	for _, s := range signals {
+		sum += s.Score
+	}
+	return sum / float32(len(signals)), nil
 }
 
 // --- Window / Mode control ---

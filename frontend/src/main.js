@@ -12,6 +12,12 @@ import {
   HideWindow,
   SetCaptureHeight,
   FindRelated,
+  GetPendingIntents,
+  ConfirmIntent,
+  DismissIntent,
+  GetSentimentTrend,
+  MergeThoughts,
+  CleanText,
 } from '../wailsjs/go/app/App.js';
 import { EventsOn } from '../wailsjs/runtime/runtime.js';
 
@@ -26,12 +32,14 @@ const SLASH_COMMANDS = [
 let mode = 'braindump'; // 'braindump' | 'review'
 let reviewThoughts = [];
 let hiddenThoughts = [];
+let pendingIntents = [];
 let selectedThoughtId = null;
-let reviewFilter = 'all'; // 'all' | tag name | 'mishap'
+let reviewFilter = 'all'; // 'all' | tag name | 'mishap' | 'actions'
 let searchTimer = null;
 let relatedTimer = null;  // debounce for proactive synthesis (DELTA-3c)
 let slashIndex = -1;     // highlighted suggestion index, -1 = none
 let slashVisible = [];   // currently visible filtered commands
+let mergeSelectionIds = new Set(); // IDs selected for merge (DELTA-7a)
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -46,6 +54,9 @@ EventsOn('mode:capture', () => enterBraindump());
 EventsOn('mode:review',  () => enterReview());
 EventsOn('thought:classified', () => { if (mode === 'review') refreshGarden(); });
 EventsOn('mishaps:changed', () => { if (mode === 'review') refreshMishapBadge(); });
+EventsOn('intents:changed', () => { if (mode === 'review') refreshIntentsBadge(); });
+EventsOn('thoughts:merged', () => { if (mode === 'review') refreshGarden(); });
+EventsOn('wellbeing:alert', () => { if (mode === 'review') checkAndShowWellbeingCard(); });
 
 function buildApp() {
   document.getElementById('app').innerHTML = `
@@ -98,6 +109,7 @@ function enterReview() {
   const input = document.getElementById('thought-input');
   if (input) { input.placeholder = 'Search garden…'; input.value = ''; input.focus(); }
   refreshGarden();
+  checkAndShowWellbeingCard();
 }
 
 // ─── Input ────────────────────────────────────────────────────────────────────
@@ -134,7 +146,7 @@ async function onInputKeydown(e) {
   }
 
   // Arrow navigation through the thought stream in review mode (only when input is empty)
-  if (mode === 'review' && !text && slashVisible.length === 0 && reviewFilter !== 'mishap') {
+  if (mode === 'review' && !text && slashVisible.length === 0 && reviewFilter !== 'mishap' && reviewFilter !== 'actions') {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       navigateThoughts(1);
@@ -250,6 +262,7 @@ function dismissRelatedHint() {
 function mountGarden(container) {
   selectedThoughtId = null;
   reviewFilter = 'all';
+  mergeSelectionIds = new Set();
 
   container.innerHTML = `
     <div id="review-layout">
@@ -260,12 +273,22 @@ function mountGarden(container) {
           <button class="nav-btn" data-filter="idea">Ideas</button>
           <button class="nav-btn" data-filter="calendar">Calendar</button>
           <button class="nav-btn" data-filter="reminder">Reminders</button>
+          <button class="nav-btn actions-btn" data-filter="actions" style="display:none">
+            Actions <span id="actions-count" class="actions-badge"></span>
+          </button>
           <button class="nav-btn mishap-btn" data-filter="mishap" style="display:none">
             Review Needed <span id="mishap-count" class="mishap-badge"></span>
           </button>
         </nav>
       </aside>
-      <main id="stream"></main>
+      <div id="stream-wrapper">
+        <div id="merge-toolbar" style="display:none">
+          <span id="merge-count-label"></span>
+          <button id="btn-merge-selected" class="btn-primary btn-merge">Merge selected</button>
+          <button id="btn-merge-cancel" class="btn-ghost">Cancel</button>
+        </div>
+        <main id="stream"></main>
+      </div>
       <aside id="inspector"></aside>
     </div>
   `;
@@ -276,15 +299,34 @@ function mountGarden(container) {
       btn.classList.add('active');
       reviewFilter = btn.dataset.filter;
       selectedThoughtId = null;
+      mergeSelectionIds = new Set();
       document.getElementById('inspector').innerHTML = '';
       refreshGarden();
     });
   });
+
+  document.getElementById('btn-merge-selected').addEventListener('click', async () => {
+    const ids = Array.from(mergeSelectionIds);
+    if (ids.length < 2) return;
+    try {
+      await MergeThoughts(ids);
+      mergeSelectionIds = new Set();
+      hideMergeToolbar();
+      await refreshGarden();
+    } catch (e) { console.error('MergeThoughts failed:', e); }
+  });
+
+  document.getElementById('btn-merge-cancel').addEventListener('click', () => {
+    mergeSelectionIds = new Set();
+    hideMergeToolbar();
+    renderStream();
+  });
 }
 
 async function refreshGarden() {
-  // Refresh mishap badge alongside the main stream
+  // Refresh badges alongside the main stream
   refreshMishapBadge();
+  refreshIntentsBadge();
 
   if (reviewFilter === 'mishap') {
     try {
@@ -294,6 +336,13 @@ async function refreshGarden() {
       console.error('GetHiddenThoughts failed:', e);
       hiddenThoughts = [];
       reviewThoughts = [];
+    }
+  } else if (reviewFilter === 'actions') {
+    try {
+      pendingIntents = await GetPendingIntents() || [];
+    } catch (e) {
+      console.error('GetPendingIntents failed:', e);
+      pendingIntents = [];
     }
   } else {
     const query = document.getElementById('thought-input')?.value.trim() || '';
@@ -325,11 +374,77 @@ async function refreshMishapBadge() {
     btn.style.display = '';
     badge.textContent = String(count);
   } else {
-    // Hide button only if it's not currently selected
     if (reviewFilter !== 'mishap') btn.style.display = 'none';
     badge.textContent = '';
   }
 }
+
+async function refreshIntentsBadge() {
+  try {
+    pendingIntents = await GetPendingIntents() || [];
+  } catch (_) {
+    return;
+  }
+  const btn = document.querySelector('.actions-btn');
+  const badge = document.getElementById('actions-count');
+  if (!btn || !badge) return;
+  const count = pendingIntents.length;
+  if (count > 0) {
+    btn.style.display = '';
+    badge.textContent = String(count);
+  } else {
+    if (reviewFilter !== 'actions') btn.style.display = 'none';
+    badge.textContent = '';
+  }
+}
+
+// ─── Wellbeing card (DELTA-5) ─────────────────────────────────────────────────
+
+const WELLBEING_MESSAGES = [
+  { text: 'Things feel heavy lately. Even a 2-minute walk can shift your state.', link: 'https://www.headspace.com', linkText: 'Try a breathing exercise' },
+  { text: 'Noticing a pattern of difficult days. Being gentle with yourself matters.', link: 'https://www.calm.com', linkText: 'Take a moment to breathe' },
+  { text: 'Your thoughts reflect a challenging period. Reaching out can help.', link: 'https://findahelpline.com', linkText: 'Find support near you' },
+];
+
+async function checkAndShowWellbeingCard() {
+  // Check if user dismissed within the last 48h
+  const dismissedUntil = localStorage.getItem('wellbeing_dismissed_until');
+  if (dismissedUntil && Date.now() < Number(dismissedUntil)) return;
+
+  try {
+    const avg = await GetSentimentTrend(7);
+    if (avg < -0.4) {
+      showWellbeingCard();
+    }
+  } catch (_) { /* no-op */ }
+}
+
+function showWellbeingCard() {
+  const stream = document.getElementById('stream');
+  if (!stream) return;
+  // Don't show if already displayed
+  if (document.getElementById('wellbeing-card')) return;
+
+  const msg = WELLBEING_MESSAGES[Math.floor(Math.random() * WELLBEING_MESSAGES.length)];
+  const card = document.createElement('div');
+  card.id = 'wellbeing-card';
+  card.className = 'wellbeing-card';
+  card.innerHTML = `
+    <div class="wellbeing-text">${escapeHtml(msg.text)}</div>
+    <div class="wellbeing-footer">
+      <a class="wellbeing-link" href="#" data-href="${escapeHtml(msg.link)}">${escapeHtml(msg.linkText)}</a>
+      <button class="wellbeing-dismiss">Dismiss for 48h</button>
+    </div>
+  `;
+  stream.insertBefore(card, stream.firstChild);
+
+  card.querySelector('.wellbeing-dismiss').addEventListener('click', () => {
+    localStorage.setItem('wellbeing_dismissed_until', String(Date.now() + 48 * 60 * 60 * 1000));
+    card.remove();
+  });
+}
+
+// ─── Stream rendering ─────────────────────────────────────────────────────────
 
 function renderStream() {
   const stream = document.getElementById('stream');
@@ -340,29 +455,79 @@ function renderStream() {
     return;
   }
 
+  if (reviewFilter === 'actions') {
+    renderActionsStream(stream);
+    return;
+  }
+
   if (reviewThoughts.length === 0) {
     stream.innerHTML = `<div class="empty-state">No thoughts yet.<br>Start capturing with <kbd>Ctrl+Shift+Space</kbd>.</div>`;
     return;
   }
 
   const query = document.getElementById('thought-input')?.value.trim() || '';
+  const showCheckboxes = mergeSelectionIds.size > 0;
+
   stream.innerHTML = reviewThoughts.map(t => {
     const content = query ? highlight(t.content, query) : escapeHtml(t.content);
     const isSelected = t.id === selectedThoughtId;
+    const isChecked = mergeSelectionIds.has(t.id);
     return `
-      <div class="stream-item${isSelected ? ' selected' : ''}" data-id="${t.id}">
-        <div class="stream-content">${content}</div>
-        <div class="stream-footer">
-          ${renderTags(t.tags || [])}
-          <span class="stream-time">${formatRelativeTime(t.created_at)}</span>
+      <div class="stream-item${isSelected ? ' selected' : ''}${isChecked ? ' merge-checked' : ''}" data-id="${t.id}">
+        <label class="merge-checkbox-wrap" title="Select for merge">
+          <input type="checkbox" class="merge-checkbox" data-id="${t.id}"${isChecked ? ' checked' : ''}>
+        </label>
+        <div class="stream-body">
+          <div class="stream-content">${content}</div>
+          <div class="stream-footer">
+            ${renderTags(t.tags || [])}
+            <span class="stream-time">${formatRelativeTime(t.created_at)}</span>
+          </div>
         </div>
       </div>
     `;
   }).join('');
 
   stream.querySelectorAll('.stream-item').forEach(el => {
-    el.addEventListener('click', () => selectThought(Number(el.dataset.id)));
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.merge-checkbox-wrap')) return; // handled below
+      selectThought(Number(el.dataset.id));
+    });
   });
+
+  stream.querySelectorAll('.merge-checkbox').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id = Number(cb.dataset.id);
+      if (cb.checked) {
+        mergeSelectionIds.add(id);
+      } else {
+        mergeSelectionIds.delete(id);
+      }
+      updateMergeToolbar();
+      renderStream();
+    });
+  });
+
+  // Restore wellbeing card after re-render if trend warrants it
+  checkAndShowWellbeingCard();
+}
+
+function updateMergeToolbar() {
+  const toolbar = document.getElementById('merge-toolbar');
+  const label = document.getElementById('merge-count-label');
+  if (!toolbar || !label) return;
+  if (mergeSelectionIds.size > 0) {
+    toolbar.style.display = 'flex';
+    label.textContent = `${mergeSelectionIds.size} selected`;
+  } else {
+    toolbar.style.display = 'none';
+    label.textContent = '';
+  }
+}
+
+function hideMergeToolbar() {
+  const toolbar = document.getElementById('merge-toolbar');
+  if (toolbar) toolbar.style.display = 'none';
 }
 
 function renderMishapStream(stream) {
@@ -412,6 +577,87 @@ function renderMishapStream(stream) {
   });
 }
 
+// ─── Intent Actions stream (DELTA-4) ─────────────────────────────────────────
+
+const INTENT_ICONS = { calendar: '📅', task: '✅', reminder: '🔔' };
+
+function renderActionsStream(stream) {
+  if (pendingIntents.length === 0) {
+    stream.innerHTML = `<div class="empty-state">No pending actions.<br>Intents are detected automatically when you capture thoughts.</div>`;
+    return;
+  }
+
+  stream.innerHTML = pendingIntents.map(intent => `
+    <div class="intent-card" data-id="${intent.id}">
+      <div class="intent-header">
+        <span class="intent-icon">${INTENT_ICONS[intent.type] || '•'}</span>
+        <span class="intent-type">${escapeHtml(intent.type)}</span>
+        <span class="intent-time">${formatRelativeTime(intent.created_at)}</span>
+      </div>
+      <div class="intent-title" contenteditable="false" data-id="${intent.id}">${escapeHtml(intent.title)}</div>
+      <div class="intent-actions">
+        <button class="btn-confirm-intent" data-id="${intent.id}">Confirm</button>
+        <button class="btn-edit-intent" data-id="${intent.id}">Edit</button>
+        <button class="btn-dismiss-intent" data-id="${intent.id}">Dismiss</button>
+      </div>
+    </div>
+  `).join('');
+
+  stream.querySelectorAll('.btn-confirm-intent').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      try {
+        await ConfirmIntent(id);
+        pendingIntents = pendingIntents.filter(i => i.id !== id);
+        refreshIntentsBadge();
+        renderActionsStream(stream);
+      } catch (e) { console.error('ConfirmIntent failed:', e); }
+    });
+  });
+
+  stream.querySelectorAll('.btn-edit-intent').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      const titleEl = stream.querySelector(`.intent-title[data-id="${id}"]`);
+      if (!titleEl) return;
+      titleEl.contentEditable = 'true';
+      titleEl.focus();
+      // Place cursor at end
+      const range = document.createRange();
+      range.selectNodeContents(titleEl);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      btn.textContent = 'Done';
+      btn.classList.add('btn-edit-done');
+      btn.removeEventListener('click', arguments.callee);
+      btn.addEventListener('click', () => {
+        titleEl.contentEditable = 'false';
+        // Update in local state (DB intent title is not updated — display only)
+        const intent = pendingIntents.find(i => i.id === id);
+        if (intent) intent.title = titleEl.textContent.trim() || intent.title;
+        btn.textContent = 'Edit';
+        btn.classList.remove('btn-edit-done');
+      });
+    });
+  });
+
+  stream.querySelectorAll('.btn-dismiss-intent').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      try {
+        await DismissIntent(id);
+        pendingIntents = pendingIntents.filter(i => i.id !== id);
+        refreshIntentsBadge();
+        renderActionsStream(stream);
+      } catch (e) { console.error('DismissIntent failed:', e); }
+    });
+  });
+}
+
+// ─── Thought navigation & selection ──────────────────────────────────────────
+
 function navigateThoughts(delta) {
   if (reviewThoughts.length === 0) return;
   const cur = reviewThoughts.findIndex(t => t.id === selectedThoughtId);
@@ -432,6 +678,8 @@ async function selectThought(id) {
     renderInspector(null);
   }
 }
+
+// ─── Inspector ────────────────────────────────────────────────────────────────
 
 function renderInspector(t) {
   const inspector = document.getElementById('inspector');
@@ -461,10 +709,22 @@ function renderInspector(t) {
     </div>
   `;
 
+  // Show merged_from if this is a merged thought
+  const mergedFrom = t.meta && t.meta.merged_from ? t.meta.merged_from : null;
+  const mergedSection = mergedFrom ? `
+    <div class="inspector-section">
+      <label class="inspector-label">Merged from</label>
+      <div class="ctx-window">${mergedFrom.length} thoughts (IDs: ${mergedFrom.join(', ')})</div>
+    </div>
+  ` : '';
+
   inspector.innerHTML = `
     <div id="inspector-inner">
       <div class="inspector-section">
-        <label class="inspector-label">Content</label>
+        <div class="inspector-label-row">
+          <label class="inspector-label">Content</label>
+          <button id="btn-clean-toggle" class="btn-clean-toggle">Clean view</button>
+        </div>
         <textarea id="inspector-content" rows="6">${escapeHtml(t.content)}</textarea>
       </div>
       ${shadowToggle}
@@ -473,6 +733,7 @@ function renderInspector(t) {
         <div>${renderTags(t.tags || [])}</div>
       </div>
       ${contextSection}
+      ${mergedSection}
       <div class="inspector-actions">
         <button id="btn-save-edit" class="btn-primary">Save</button>
         <button id="btn-delete" class="btn-danger">Delete</button>
@@ -500,7 +761,38 @@ function renderInspector(t) {
     });
   }
 
+  // DELTA-7c: Clean View toggle
+  let cleanViewActive = false;
+  const cleanBtn = document.getElementById('btn-clean-toggle');
+  const contentArea = document.getElementById('inspector-content');
+  cleanBtn.addEventListener('click', async () => {
+    cleanViewActive = !cleanViewActive;
+    if (cleanViewActive) {
+      cleanBtn.classList.add('active');
+      cleanBtn.textContent = 'Clean view ✓';
+      contentArea.disabled = true;
+      contentArea.style.opacity = '0.6';
+      try {
+        const cleaned = await CleanText(t.id);
+        contentArea.value = cleaned;
+      } catch (_) {
+        cleanViewActive = false;
+        cleanBtn.classList.remove('active');
+        cleanBtn.textContent = 'Clean view';
+        contentArea.disabled = false;
+        contentArea.style.opacity = '';
+      }
+    } else {
+      cleanBtn.classList.remove('active');
+      cleanBtn.textContent = 'Clean view';
+      contentArea.value = t.content;
+      contentArea.disabled = false;
+      contentArea.style.opacity = '';
+    }
+  });
+
   document.getElementById('btn-save-edit').addEventListener('click', async () => {
+    if (cleanViewActive) return; // don't save cleaned text
     const newContent = document.getElementById('inspector-content').value.trim();
     if (!newContent || newContent === t.content) return;
     try {

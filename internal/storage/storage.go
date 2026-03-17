@@ -53,6 +53,36 @@ type Storage interface {
 	// Thoughts without a stored embedding are absent from the returned map.
 	GetEmbeddings(ids []int64) (map[int64][]float32, error)
 
+	// MergeThoughts combines multiple thoughts into one new thought, union-merging
+	// tags and using the oldest created_at. The originals are soft-deleted.
+	MergeThoughts(ids []int64) (*domain.Thought, error)
+
+	// --- Intent management ---
+
+	// SaveIntent persists a new intent derived from a thought.
+	SaveIntent(intent domain.Intent) error
+
+	// GetIntent returns a single intent by ID.
+	GetIntent(id string) (*domain.Intent, error)
+
+	// GetPendingIntents returns all intents with status "pending".
+	GetPendingIntents() ([]domain.Intent, error)
+
+	// ConfirmIntent marks an intent as confirmed.
+	ConfirmIntent(id string) error
+
+	// DismissIntent marks an intent as dismissed.
+	DismissIntent(id string) error
+
+	// --- Wellbeing / sentiment ---
+
+	// StoreSentiment records a sentiment polarity score for a thought.
+	StoreSentiment(thoughtID int64, score float32) error
+
+	// GetSentimentTrend returns wellbeing signals for thoughts captured within
+	// the last `days` days, ordered by created_at ascending.
+	GetSentimentTrend(days int) ([]domain.WellbeingSignal, error)
+
 	// Close releases underlying resources.
 	Close() error
 }

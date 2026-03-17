@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -77,12 +78,34 @@ func (s *SQLiteStorage) migrate() error {
 	}
 
 	// Embeddings table for vector similarity search.
-	// Stores 384-dim float32 vectors as little-endian BLOB (1536 bytes each).
 	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS embeddings (
 		thought_id INTEGER PRIMARY KEY REFERENCES thoughts(id) ON DELETE CASCADE,
 		vector     BLOB NOT NULL
 	)`); err != nil {
 		return fmt.Errorf("create embeddings table: %w", err)
+	}
+
+	// Intent table — stores actionable items extracted from thoughts.
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS intents (
+		id         TEXT    PRIMARY KEY,
+		thought_id INTEGER NOT NULL REFERENCES thoughts(id) ON DELETE CASCADE,
+		type       TEXT    NOT NULL,
+		title      TEXT    NOT NULL,
+		date       TEXT,
+		status     TEXT    NOT NULL DEFAULT 'pending',
+		created_at TEXT    NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("create intents table: %w", err)
+	}
+
+	// Wellbeing signals table — one sentiment score per thought.
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS wellbeing_signals (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		thought_id INTEGER NOT NULL REFERENCES thoughts(id) ON DELETE CASCADE,
+		score      REAL    NOT NULL,
+		created_at TEXT    NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("create wellbeing_signals table: %w", err)
 	}
 
 	// Additive column migrations — safe to run on existing databases.
@@ -100,13 +123,6 @@ func (s *SQLiteStorage) migrate() error {
 		}
 	}
 	return nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // SaveThought implements Storage.
@@ -143,7 +159,7 @@ func (s *SQLiteStorage) SaveThought(content string, ctx domain.CaptureContext) (
 func (s *SQLiteStorage) GetThought(id int64) (*domain.Thought, error) {
 	t, err := s.scanOneThought(
 		s.db.QueryRow(
-			`SELECT id, content, raw_content, window_title, app_name, url, hidden, created_at, updated_at
+			`SELECT id, content, raw_content, window_title, app_name, url, hidden, meta, created_at, updated_at
 			 FROM thoughts WHERE id = ?`, id,
 		),
 	)
@@ -189,7 +205,7 @@ func (s *SQLiteStorage) SearchThoughts(query string, limit int) ([]*domain.Thoug
 		limit = 20
 	}
 	rows, err := s.db.Query(
-		`SELECT id, content, raw_content, window_title, app_name, url, hidden, created_at, updated_at
+		`SELECT id, content, raw_content, window_title, app_name, url, hidden, meta, created_at, updated_at
 		 FROM thoughts
 		 WHERE hidden = 0 AND content LIKE ? COLLATE NOCASE
 		 ORDER BY created_at DESC
@@ -209,7 +225,7 @@ func (s *SQLiteStorage) GetRecentThoughts(limit int) ([]*domain.Thought, error) 
 		limit = 20
 	}
 	rows, err := s.db.Query(
-		`SELECT id, content, raw_content, window_title, app_name, url, hidden, created_at, updated_at
+		`SELECT id, content, raw_content, window_title, app_name, url, hidden, meta, created_at, updated_at
 		 FROM thoughts
 		 WHERE hidden = 0
 		 ORDER BY created_at DESC
@@ -248,7 +264,7 @@ func (s *SQLiteStorage) UnhideThought(id int64) error {
 // GetHiddenThoughts implements Storage.
 func (s *SQLiteStorage) GetHiddenThoughts() ([]*domain.Thought, error) {
 	rows, err := s.db.Query(
-		`SELECT id, content, raw_content, window_title, app_name, url, hidden, created_at, updated_at
+		`SELECT id, content, raw_content, window_title, app_name, url, hidden, meta, created_at, updated_at
 		 FROM thoughts
 		 WHERE hidden = 1
 		 ORDER BY created_at DESC`,
@@ -261,7 +277,6 @@ func (s *SQLiteStorage) GetHiddenThoughts() ([]*domain.Thought, error) {
 }
 
 // StoreEmbedding implements Storage.
-// The embedding is encoded as a little-endian sequence of float32 values (4 bytes each).
 func (s *SQLiteStorage) StoreEmbedding(thoughtID int64, embedding []float32) error {
 	if len(embedding) == 0 {
 		return nil
@@ -279,14 +294,13 @@ func (s *SQLiteStorage) StoreEmbedding(thoughtID int64, embedding []float32) err
 }
 
 // GetEmbeddings returns the stored float32 vectors for the given thought IDs.
-// Thoughts without a stored embedding are absent from the returned map.
 func (s *SQLiteStorage) GetEmbeddings(ids []int64) (map[int64][]float32, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 	placeholders := strings.Repeat("?,", len(ids))
 	placeholders = placeholders[:len(placeholders)-1]
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		args[i] = id
 	}
@@ -316,9 +330,6 @@ func (s *SQLiteStorage) GetEmbeddings(ids []int64) (map[int64][]float32, error) 
 }
 
 // SemanticSearch implements Storage.
-// Currently delegates to text LIKE search; a future sqlite-vss integration will
-// rank by cosine similarity between stored 384-dim embeddings.
-// The app layer (app.SemanticSearch) handles vector ranking when embeddings exist.
 func (s *SQLiteStorage) SemanticSearch(query string, limit int) ([]*domain.Thought, error) {
 	return s.SearchThoughts(query, limit)
 }
@@ -332,6 +343,195 @@ func (s *SQLiteStorage) AddTag(thoughtID int64, name, source string, confidence 
 	return err
 }
 
+// MergeThoughts implements Storage.
+// Creates a new thought with the concatenated content of all given thoughts,
+// union-merged tags, and the oldest created_at. The originals are soft-deleted.
+func (s *SQLiteStorage) MergeThoughts(ids []int64) (*domain.Thought, error) {
+	if len(ids) < 2 {
+		return nil, fmt.Errorf("MergeThoughts requires at least 2 thought IDs")
+	}
+
+	// Load all thoughts outside the transaction.
+	var thoughts []*domain.Thought
+	for _, id := range ids {
+		t, err := s.GetThought(id)
+		if err != nil {
+			return nil, fmt.Errorf("load thought %d: %w", id, err)
+		}
+		thoughts = append(thoughts, t)
+	}
+
+	// Find the oldest created_at.
+	oldest := thoughts[0].CreatedAt
+	for _, t := range thoughts[1:] {
+		if t.CreatedAt.Before(oldest) {
+			oldest = t.CreatedAt
+		}
+	}
+
+	// Concatenate content.
+	parts := make([]string, len(thoughts))
+	for i, t := range thoughts {
+		parts[i] = t.Content
+	}
+	mergedContent := strings.Join(parts, "\n\n")
+
+	// Union tags by name.
+	type tagEntry struct{ name, source string; confidence float64 }
+	tagSeen := map[string]bool{}
+	var uniqTags []tagEntry
+	for _, t := range thoughts {
+		for _, tag := range t.Tags {
+			if !tagSeen[tag.Name] {
+				tagSeen[tag.Name] = true
+				uniqTags = append(uniqTags, tagEntry{tag.Name, tag.Source, tag.Confidence})
+			}
+		}
+	}
+
+	// Build meta JSON.
+	metaJSON, _ := json.Marshal(map[string]any{"merged_from": ids})
+
+	now := time.Now().UTC()
+	nowStr := now.Format(timeFormat)
+	oldestStr := oldest.Format(timeFormat)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// Insert new merged thought.
+	res, err := tx.Exec(
+		`INSERT INTO thoughts (content, raw_content, window_title, app_name, url, meta, created_at, updated_at)
+		 VALUES (?, ?, '', '', '', ?, ?, ?)`,
+		mergedContent, mergedContent, string(metaJSON), oldestStr, nowStr,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert merged thought: %w", err)
+	}
+	newID, _ := res.LastInsertId()
+
+	// Copy union-merged tags.
+	for _, tag := range uniqTags {
+		if _, err := tx.Exec(
+			`INSERT INTO tags (thought_id, name, source, confidence, created_at) VALUES (?, ?, ?, ?, ?)`,
+			newID, tag.name, tag.source, tag.confidence, nowStr,
+		); err != nil {
+			return nil, fmt.Errorf("insert merged tag: %w", err)
+		}
+	}
+
+	// Soft-delete originals and mark them as merged.
+	for _, id := range ids {
+		if _, err := tx.Exec(`UPDATE thoughts SET hidden = 1 WHERE id = ?`, id); err != nil {
+			return nil, fmt.Errorf("hide original %d: %w", id, err)
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO tags (thought_id, name, source, confidence, created_at) VALUES (?, 'merged', 'system', 1.0, ?)`,
+			id, nowStr,
+		); err != nil {
+			return nil, fmt.Errorf("add merged tag to original %d: %w", id, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetThought(newID)
+}
+
+// --- Intent management ---
+
+// SaveIntent implements Storage.
+func (s *SQLiteStorage) SaveIntent(intent domain.Intent) error {
+	var dateStr *string
+	if intent.Date != nil {
+		d := intent.Date.UTC().Format(timeFormat)
+		dateStr = &d
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO intents (id, thought_id, type, title, date, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		intent.ID, intent.ThoughtID, intent.Type, intent.Title, dateStr, intent.Status,
+		intent.CreatedAt.UTC().Format(timeFormat),
+	)
+	return err
+}
+
+// GetIntent implements Storage.
+func (s *SQLiteStorage) GetIntent(id string) (*domain.Intent, error) {
+	row := s.db.QueryRow(
+		`SELECT id, thought_id, type, title, date, status, created_at FROM intents WHERE id = ?`, id,
+	)
+	return s.scanOneIntent(row)
+}
+
+// GetPendingIntents implements Storage.
+func (s *SQLiteStorage) GetPendingIntents() ([]domain.Intent, error) {
+	rows, err := s.db.Query(
+		`SELECT id, thought_id, type, title, date, status, created_at
+		 FROM intents WHERE status = 'pending' ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanIntents(rows)
+}
+
+// ConfirmIntent implements Storage.
+func (s *SQLiteStorage) ConfirmIntent(id string) error {
+	_, err := s.db.Exec(`UPDATE intents SET status = 'confirmed' WHERE id = ?`, id)
+	return err
+}
+
+// DismissIntent implements Storage.
+func (s *SQLiteStorage) DismissIntent(id string) error {
+	_, err := s.db.Exec(`UPDATE intents SET status = 'dismissed' WHERE id = ?`, id)
+	return err
+}
+
+// --- Wellbeing / sentiment ---
+
+// StoreSentiment implements Storage.
+func (s *SQLiteStorage) StoreSentiment(thoughtID int64, score float32) error {
+	_, err := s.db.Exec(
+		`INSERT INTO wellbeing_signals (thought_id, score, created_at) VALUES (?, ?, ?)`,
+		thoughtID, score, time.Now().UTC().Format(timeFormat),
+	)
+	return err
+}
+
+// GetSentimentTrend implements Storage.
+func (s *SQLiteStorage) GetSentimentTrend(days int) ([]domain.WellbeingSignal, error) {
+	if days <= 0 {
+		days = 7
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Format(timeFormat)
+	rows, err := s.db.Query(
+		`SELECT thought_id, score, created_at FROM wellbeing_signals
+		 WHERE created_at >= ? ORDER BY created_at ASC`,
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var signals []domain.WellbeingSignal
+	for rows.Next() {
+		var ws domain.WellbeingSignal
+		var createdStr string
+		if err := rows.Scan(&ws.ThoughtID, &ws.Score, &createdStr); err != nil {
+			return nil, err
+		}
+		ws.CreatedAt, _ = time.Parse(timeFormat, createdStr)
+		signals = append(signals, ws)
+	}
+	return signals, rows.Err()
+}
+
 // Close implements Storage.
 func (s *SQLiteStorage) Close() error {
 	return s.db.Close()
@@ -343,15 +543,19 @@ func (s *SQLiteStorage) scanOneThought(row *sql.Row) (*domain.Thought, error) {
 	var t domain.Thought
 	var createdStr, updatedStr string
 	var hidden int
+	var metaStr sql.NullString
 	err := row.Scan(
 		&t.ID, &t.Content, &t.RawContent,
 		&t.Context.WindowTitle, &t.Context.AppName, &t.Context.URL,
-		&hidden, &createdStr, &updatedStr,
+		&hidden, &metaStr, &createdStr, &updatedStr,
 	)
 	if err != nil {
 		return nil, err
 	}
 	t.Hidden = hidden != 0
+	if metaStr.Valid && metaStr.String != "" {
+		_ = json.Unmarshal([]byte(metaStr.String), &t.Meta)
+	}
 	t.CreatedAt, _ = time.Parse(timeFormat, createdStr)
 	t.UpdatedAt, _ = time.Parse(timeFormat, updatedStr)
 	return &t, nil
@@ -365,14 +569,18 @@ func (s *SQLiteStorage) scanThoughts(rows *sql.Rows) ([]*domain.Thought, error) 
 		var t domain.Thought
 		var createdStr, updatedStr string
 		var hidden int
+		var metaStr sql.NullString
 		if err := rows.Scan(
 			&t.ID, &t.Content, &t.RawContent,
 			&t.Context.WindowTitle, &t.Context.AppName, &t.Context.URL,
-			&hidden, &createdStr, &updatedStr,
+			&hidden, &metaStr, &createdStr, &updatedStr,
 		); err != nil {
 			return nil, err
 		}
 		t.Hidden = hidden != 0
+		if metaStr.Valid && metaStr.String != "" {
+			_ = json.Unmarshal([]byte(metaStr.String), &t.Meta)
+		}
 		t.CreatedAt, _ = time.Parse(timeFormat, createdStr)
 		t.UpdatedAt, _ = time.Parse(timeFormat, updatedStr)
 		thoughts = append(thoughts, &t)
@@ -402,7 +610,7 @@ func (s *SQLiteStorage) fetchTagsForIDs(ids []int64) (map[int64][]domain.Tag, er
 	placeholders := strings.Repeat("?,", len(ids))
 	placeholders = placeholders[:len(placeholders)-1] // trim trailing comma
 
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		args[i] = id
 	}
@@ -428,4 +636,42 @@ func (s *SQLiteStorage) fetchTagsForIDs(ids []int64) (map[int64][]domain.Tag, er
 		result[tag.ThoughtID] = append(result[tag.ThoughtID], tag)
 	}
 	return result, rows.Err()
+}
+
+func (s *SQLiteStorage) scanOneIntent(row *sql.Row) (*domain.Intent, error) {
+	var intent domain.Intent
+	var dateStr sql.NullString
+	var createdStr string
+	err := row.Scan(&intent.ID, &intent.ThoughtID, &intent.Type, &intent.Title, &dateStr, &intent.Status, &createdStr)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("intent not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if dateStr.Valid && dateStr.String != "" {
+		d, _ := time.Parse(timeFormat, dateStr.String)
+		intent.Date = &d
+	}
+	intent.CreatedAt, _ = time.Parse(timeFormat, createdStr)
+	return &intent, nil
+}
+
+func (s *SQLiteStorage) scanIntents(rows *sql.Rows) ([]domain.Intent, error) {
+	var intents []domain.Intent
+	for rows.Next() {
+		var intent domain.Intent
+		var dateStr sql.NullString
+		var createdStr string
+		if err := rows.Scan(&intent.ID, &intent.ThoughtID, &intent.Type, &intent.Title, &dateStr, &intent.Status, &createdStr); err != nil {
+			return nil, err
+		}
+		if dateStr.Valid && dateStr.String != "" {
+			d, _ := time.Parse(timeFormat, dateStr.String)
+			intent.Date = &d
+		}
+		intent.CreatedAt, _ = time.Parse(timeFormat, createdStr)
+		intents = append(intents, intent)
+	}
+	return intents, rows.Err()
 }

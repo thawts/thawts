@@ -3,19 +3,31 @@
 import {context} from '../models';
 import {domain} from '../models';
 
+export function CleanText(arg1:number):Promise<string>;
+
+export function ConfirmIntent(arg1:string):Promise<void>;
+
 export function Context():Promise<context.Context>;
 
 export function DeleteThought(arg1:number):Promise<void>;
+
+export function DismissIntent(arg1:string):Promise<void>;
 
 export function FindRelated(arg1:string):Promise<domain.Thought>;
 
 export function GetHiddenThoughts():Promise<Array<domain.Thought>>;
 
+export function GetPendingIntents():Promise<Array<domain.Intent>>;
+
 export function GetRecentThoughts(arg1:number):Promise<Array<domain.Thought>>;
+
+export function GetSentimentTrend(arg1:number):Promise<number>;
 
 export function GetThought(arg1:number):Promise<domain.Thought>;
 
 export function HideWindow():Promise<void>;
+
+export function MergeThoughts(arg1:Array<number>):Promise<domain.Thought>;
 
 export function Quit():Promise<void>;
 

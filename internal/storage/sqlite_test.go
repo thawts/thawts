@@ -2,6 +2,7 @@ package storage
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -300,4 +301,200 @@ func TestSearchReturnsTagsAttached(t *testing.T) {
 	if len(results[0].Tags) == 0 {
 		t.Error("expected tags to be included in search results")
 	}
+}
+
+// --- Intent tests ---
+
+func TestSaveAndGetPendingIntents(t *testing.T) {
+	store := newTestDB(t)
+
+	thought, _ := store.SaveThought("meeting with team tomorrow at 10am", emptyCtx)
+
+	intent := domain.Intent{
+		ID:        "test-intent-1",
+		ThoughtID: thought.ID,
+		Type:      "calendar",
+		Title:     "meeting with team",
+		Status:    "pending",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := store.SaveIntent(intent); err != nil {
+		t.Fatalf("SaveIntent: %v", err)
+	}
+
+	pending, err := store.GetPendingIntents()
+	if err != nil {
+		t.Fatalf("GetPendingIntents: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending intent, got %d", len(pending))
+	}
+	if pending[0].ID != "test-intent-1" {
+		t.Errorf("intent ID = %q, want test-intent-1", pending[0].ID)
+	}
+	if pending[0].Type != "calendar" {
+		t.Errorf("intent type = %q, want calendar", pending[0].Type)
+	}
+}
+
+func TestGetIntent(t *testing.T) {
+	store := newTestDB(t)
+
+	thought, _ := store.SaveThought("remind me to call doctor", emptyCtx)
+	intent := domain.Intent{
+		ID:        "test-intent-2",
+		ThoughtID: thought.ID,
+		Type:      "reminder",
+		Title:     "call doctor",
+		Status:    "pending",
+		CreatedAt: time.Now().UTC(),
+	}
+	store.SaveIntent(intent)
+
+	got, err := store.GetIntent("test-intent-2")
+	if err != nil {
+		t.Fatalf("GetIntent: %v", err)
+	}
+	if got.Title != "call doctor" {
+		t.Errorf("Title = %q, want call doctor", got.Title)
+	}
+}
+
+func TestConfirmAndDismissIntent(t *testing.T) {
+	store := newTestDB(t)
+
+	thought, _ := store.SaveThought("buy groceries", emptyCtx)
+
+	intentA := domain.Intent{ID: "ia", ThoughtID: thought.ID, Type: "task", Title: "buy groceries", Status: "pending", CreatedAt: time.Now().UTC()}
+	intentB := domain.Intent{ID: "ib", ThoughtID: thought.ID, Type: "task", Title: "meal prep", Status: "pending", CreatedAt: time.Now().UTC()}
+	store.SaveIntent(intentA)
+	store.SaveIntent(intentB)
+
+	if err := store.ConfirmIntent("ia"); err != nil {
+		t.Fatalf("ConfirmIntent: %v", err)
+	}
+	if err := store.DismissIntent("ib"); err != nil {
+		t.Fatalf("DismissIntent: %v", err)
+	}
+
+	pending, _ := store.GetPendingIntents()
+	if len(pending) != 0 {
+		t.Errorf("expected 0 pending intents after confirm+dismiss, got %d", len(pending))
+	}
+
+	confirmed, _ := store.GetIntent("ia")
+	if confirmed.Status != "confirmed" {
+		t.Errorf("status = %q, want confirmed", confirmed.Status)
+	}
+}
+
+func TestIntentCascadeDeletesWithThought(t *testing.T) {
+	store := newTestDB(t)
+
+	thought, _ := store.SaveThought("lunch with Alice tomorrow", emptyCtx)
+	store.SaveIntent(domain.Intent{ID: "ic", ThoughtID: thought.ID, Type: "calendar", Title: "lunch", Status: "pending", CreatedAt: time.Now().UTC()})
+
+	store.DeleteThought(thought.ID)
+
+	_, err := store.GetIntent("ic")
+	if err == nil {
+		t.Error("expected error retrieving intent after parent thought deleted")
+	}
+}
+
+// --- Wellbeing signal tests ---
+
+func TestStoreSentimentAndGetTrend(t *testing.T) {
+	store := newTestDB(t)
+
+	t1, _ := store.SaveThought("feeling really tired and overwhelmed", emptyCtx)
+	t2, _ := store.SaveThought("things are awful today", emptyCtx)
+
+	if err := store.StoreSentiment(t1.ID, -0.6); err != nil {
+		t.Fatalf("StoreSentiment t1: %v", err)
+	}
+	if err := store.StoreSentiment(t2.ID, -0.8); err != nil {
+		t.Fatalf("StoreSentiment t2: %v", err)
+	}
+
+	signals, err := store.GetSentimentTrend(7)
+	if err != nil {
+		t.Fatalf("GetSentimentTrend: %v", err)
+	}
+	if len(signals) != 2 {
+		t.Fatalf("expected 2 signals, got %d", len(signals))
+	}
+}
+
+func TestGetSentimentTrendEmptyWindow(t *testing.T) {
+	store := newTestDB(t)
+
+	signals, err := store.GetSentimentTrend(7)
+	if err != nil {
+		t.Fatalf("GetSentimentTrend: %v", err)
+	}
+	if len(signals) != 0 {
+		t.Errorf("expected 0 signals on empty DB, got %d", len(signals))
+	}
+}
+
+// --- MergeThoughts tests ---
+
+func TestMergeThoughts(t *testing.T) {
+	store := newTestDB(t)
+
+	t1, _ := store.SaveThought("first fragment", emptyCtx)
+	t2, _ := store.SaveThought("second fragment", emptyCtx)
+	store.AddTag(t1.ID, "idea", "regex", 0.9)
+	store.AddTag(t2.ID, "todo", "regex", 0.8)
+
+	merged, err := store.MergeThoughts([]int64{t1.ID, t2.ID})
+	if err != nil {
+		t.Fatalf("MergeThoughts: %v", err)
+	}
+	if merged.ID == 0 {
+		t.Fatal("merged thought has zero ID")
+	}
+
+	// Content should contain both fragments
+	if !containsStr(merged.Content, "first fragment") || !containsStr(merged.Content, "second fragment") {
+		t.Errorf("merged content missing fragments: %q", merged.Content)
+	}
+
+	// Tags should be union-merged
+	tagNames := map[string]bool{}
+	for _, tag := range merged.Tags {
+		tagNames[tag.Name] = true
+	}
+	if !tagNames["idea"] || !tagNames["todo"] {
+		t.Errorf("merged tags missing: %v", tagNames)
+	}
+
+	// Meta should contain merged_from
+	if merged.Meta == nil {
+		t.Fatal("merged thought has no meta")
+	}
+
+	// Originals should be hidden
+	hidden, _ := store.GetHiddenThoughts()
+	hiddenIDs := map[int64]bool{}
+	for _, h := range hidden {
+		hiddenIDs[h.ID] = true
+	}
+	if !hiddenIDs[t1.ID] || !hiddenIDs[t2.ID] {
+		t.Error("original thoughts should be hidden after merge")
+	}
+}
+
+func TestMergeThoughtsRequiresAtLeastTwo(t *testing.T) {
+	store := newTestDB(t)
+	t1, _ := store.SaveThought("only one", emptyCtx)
+	_, err := store.MergeThoughts([]int64{t1.ID})
+	if err == nil {
+		t.Error("expected error when merging fewer than 2 thoughts")
+	}
+}
+
+func containsStr(s, sub string) bool {
+	return strings.Contains(s, sub)
 }

@@ -548,3 +548,270 @@ html, body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ─── Stream wrapper + merge toolbar (DELTA-7a) ──────────────────────────── */
+
+#stream-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#merge-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#merge-count-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.btn-merge {
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border-2);
+  color: var(--text-muted);
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.btn-ghost:hover { color: var(--text); border-color: var(--text-dim); }
+
+/* ─── Stream item with merge checkbox ────────────────────────────────────── */
+
+.stream-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.merge-checkbox-wrap {
+  display: flex;
+  align-items: center;
+  padding-top: 14px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.1s;
+  cursor: pointer;
+}
+
+.stream-item:hover .merge-checkbox-wrap,
+.stream-item.merge-checked .merge-checkbox-wrap {
+  opacity: 1;
+}
+
+.merge-checkbox {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.stream-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.stream-item.merge-checked {
+  border-color: var(--accent);
+  background: rgba(85, 136, 255, 0.06);
+}
+
+/* ─── Intent Actions (DELTA-4) ──────────────────────────────────────────── */
+
+.actions-btn {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px !important;
+  color: #64c8ff !important;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.actions-badge {
+  background: #64c8ff;
+  color: #000;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+
+.intent-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.intent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.intent-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.intent-type {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  flex: 1;
+}
+
+.intent-time {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.intent-title {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  word-break: break-word;
+  border-radius: 3px;
+  padding: 2px 4px;
+  outline: none;
+}
+
+.intent-title[contenteditable="true"] {
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+}
+
+.intent-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-confirm-intent {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.btn-confirm-intent:hover { opacity: 0.85; }
+
+.btn-edit-intent, .btn-dismiss-intent {
+  background: transparent;
+  border: 1px solid var(--border-2);
+  color: var(--text-muted);
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.btn-edit-intent:hover, .btn-dismiss-intent:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.btn-edit-done { border-color: var(--accent) !important; color: var(--accent) !important; }
+
+/* ─── Wellbeing card (DELTA-5) ──────────────────────────────────────────── */
+
+.wellbeing-card {
+  background: var(--bg-3);
+  border: 1px solid #2a3a2a;
+  border-left: 3px solid #64a064;
+  border-radius: 6px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.wellbeing-text {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.wellbeing-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wellbeing-link {
+  font-size: 13px;
+  color: #64a064;
+  text-decoration: none;
+  border-bottom: 1px solid #64a06440;
+}
+
+.wellbeing-link:hover { border-bottom-color: #64a064; }
+
+.wellbeing-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  padding: 0;
+}
+
+.wellbeing-dismiss:hover { color: var(--text-muted); }
+
+/* ─── Inspector label row + Clean View toggle (DELTA-7c) ─────────────────── */
+
+.inspector-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.btn-clean-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  padding: 0;
+  font-family: var(--font-sans);
+  transition: color 0.15s;
+}
+
+.btn-clean-toggle:hover { color: var(--text-muted); }
+.btn-clean-toggle.active { color: var(--accent); }
