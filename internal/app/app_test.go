@@ -1,132 +1,124 @@
 package app
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
+
+	appai "thawts-client/internal/ai"
+	"thawts-client/internal/metadata"
 	"thawts-client/internal/storage"
 )
 
-func TestApp_Greet(t *testing.T) {
-	// Setup
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-	store, err := storage.NewService(dbPath)
+func newTestApp(t *testing.T) *App {
+	t.Helper()
+	store, err := storage.NewSQLiteStorage(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
+		t.Fatalf("NewSQLiteStorage: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() })
 
-	app := NewApp(store)
-	app.SetTestMode(true)
-	app.Startup(context.Background())
+	a := NewApp(store, appai.NewStubProvider(), metadata.NewStubProvider())
+	a.SetTestMode(true)
+	return a
+}
 
-	// Test Greet
-	name := "Tester"
-	expected := "Hello Tester, It's show time!"
-	result := app.Greet(name)
+func TestSaveThoughtReturnsThought(t *testing.T) {
+	a := newTestApp(t)
 
-	if result != expected {
-		t.Errorf("Greet(%q) = %q; want %q", name, result, expected)
+	thought, err := a.SaveThought("hello world")
+	if err != nil {
+		t.Fatalf("SaveThought: %v", err)
+	}
+	if thought.ID == 0 {
+		t.Error("expected non-zero ID")
+	}
+	if thought.Content != "hello world" {
+		t.Errorf("Content = %q, want %q", thought.Content, "hello world")
+	}
+	if thought.RawContent != "hello world" {
+		t.Errorf("RawContent = %q", thought.RawContent)
 	}
 }
 
-func TestApp_Save(t *testing.T) {
-	// Setup
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test_save.db")
-	store, err := storage.NewService(dbPath)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer store.Close()
+func TestGetRecentThoughts(t *testing.T) {
+	a := newTestApp(t)
 
-	app := NewApp(store)
-	app.SetTestMode(true)
-	app.Startup(context.Background())
-
-	// Test Save
-	thought := "Test Thought"
-	err = app.Save(thought)
-	if err != nil {
-		t.Fatalf("Save failed: %v", err)
+	for _, text := range []string{"first", "second", "third"} {
+		if _, err := a.SaveThought(text); err != nil {
+			t.Fatalf("SaveThought(%q): %v", text, err)
+		}
 	}
 
-	// Verify in DB
-	// We can't access store.db directly easily unless we expose it or use storage methods.
-	// Since we are integration testing with storage, we trust storage works if no error returned,
-	// BUT better to verify. Application doesn't expose "GetThoughts".
-	// We can use Export logic or just trust the error return + storage tests covering the rest.
-	// For this unit test, checking error is sufficient for "App.Save" wiring.
+	recent, err := a.GetRecentThoughts(2)
+	if err != nil {
+		t.Fatalf("GetRecentThoughts: %v", err)
+	}
+	if len(recent) != 2 {
+		t.Errorf("got %d thoughts, want 2", len(recent))
+	}
+	// Most recent first
+	if recent[0].Content != "third" {
+		t.Errorf("expected most recent first, got %q", recent[0].Content)
+	}
 }
 
-func TestApp_ConfigAndRecent(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test_config.db")
-	store, err := storage.NewService(dbPath)
+func TestSearchThoughts(t *testing.T) {
+	a := newTestApp(t)
+
+	a.SaveThought("buy groceries")
+	a.SaveThought("call the dentist")
+	a.SaveThought("BUY a new keyboard")
+
+	results, err := a.SearchThoughts("buy")
 	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
+		t.Fatalf("SearchThoughts: %v", err)
 	}
-	defer store.Close()
+	if len(results) != 2 {
+		t.Errorf("got %d results, want 2", len(results))
+	}
+}
 
-	app := NewApp(store)
-	app.SetTestMode(true)
-	app.Startup(context.Background())
+func TestSearchEmptyQueryReturnsRecent(t *testing.T) {
+	a := newTestApp(t)
 
-	// 1. Verify default behavior (config false)
-	results := app.Search("")
-	if results != nil {
-		t.Errorf("Expected nil results when query is empty and config off, got %v", results)
+	a.SaveThought("alpha")
+	a.SaveThought("beta")
+
+	results, err := a.SearchThoughts("")
+	if err != nil {
+		t.Fatalf("SearchThoughts: %v", err)
+	}
+	if len(results) == 0 {
+		t.Error("expected results for empty query")
+	}
+}
+
+func TestUpdateThoughtPreservesShadowRecord(t *testing.T) {
+	a := newTestApp(t)
+
+	saved, _ := a.SaveThought("original")
+	updated, err := a.UpdateThought(saved.ID, "edited")
+	if err != nil {
+		t.Fatalf("UpdateThought: %v", err)
+	}
+	if updated.Content != "edited" {
+		t.Errorf("Content = %q, want edited", updated.Content)
+	}
+	if updated.RawContent != "original" {
+		t.Errorf("RawContent = %q, shadow record must not change", updated.RawContent)
+	}
+}
+
+func TestDeleteThought(t *testing.T) {
+	a := newTestApp(t)
+
+	saved, _ := a.SaveThought("to delete")
+	if err := a.DeleteThought(saved.ID); err != nil {
+		t.Fatalf("DeleteThought: %v", err)
 	}
 
-	// 2. Enable config via Slash Command
-	if err := app.Save("/config show-recent true"); err != nil {
-		t.Fatalf("Failed to run config command: %v", err)
-	}
-
-	// 3. Verify config persistent (in App struct)
-	// We can't access private field easily, but behavior should change.
-
-	// Add a thought so we have something to show
-	app.Save("Recent Thought")
-
-	// 4. Verify Search("") now returns results
-	results = app.Search("")
-	if len(results) != 1 {
-		t.Errorf("Expected 1 result after enabling show-recent, got %d", len(results))
-	}
-	if results[0].Content != "Recent Thought" {
-		t.Errorf("Expected 'Recent Thought', got '%s'", results[0].Content)
-	}
-
-	// 5. Disable config
-	if err := app.Save("/config show-recent false"); err != nil {
-		t.Fatalf("Failed to run config command: %v", err)
-	}
-
-	// 6. Verify behavior reverts
-	results = app.Search("")
-	if results != nil {
-		t.Errorf("Expected nil results after disabling show-recent, got %v", results)
-	}
-
-	// 7. Verify Persistence (NewApp should load it)
-	// Set to true again
-	app.Save("/config show-recent true")
-
-	// New App instance
-	app2 := NewApp(store)
-	app2.Startup(context.Background())
-	// Should adhere to persisted config
-	// (Note: app2 doesn't share *App struct state, but storage state)
-
-	// However, NewApp loads from storage.
-	// Let's verify app2 behaves correctly.
-	// Add another thought
-	app2.Save("New Thought")
-
-	results2 := app2.Search("")
-	if len(results2) < 1 {
-		t.Errorf("Expected results from new app instance due to persisted config")
+	_, err := a.GetThought(saved.ID)
+	if err == nil {
+		t.Error("expected error retrieving deleted thought")
 	}
 }

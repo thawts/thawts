@@ -1,344 +1,343 @@
 import './style.css';
-import { Hide, Save, Search, SetWindowHeight } from '../wailsjs/go/app/App';
+import {
+  SaveThought,
+  SearchThoughts,
+  UpdateThought,
+  DeleteThought,
+  GetThought,
+  ShowCapture,
+  ShowReview,
+  HideWindow,
+  SetCaptureHeight,
+} from '../wailsjs/go/app/App.js';
+import { EventsOn } from '../wailsjs/runtime/runtime.js';
 
-document.querySelector('#app').innerHTML = `
-    <div class="input-container">
-        <input id="search-input" type="text" placeholder="Type what's on your mind..." autofocus />
-        <div id="suggestions" class="suggestions-container"></div>
+// ─── State ────────────────────────────────────────────────────────────────────
+
+let mode = 'braindump'; // 'braindump' | 'review'
+let reviewThoughts = [];
+let selectedThoughtId = null;
+let reviewFilter = 'all';
+let searchTimer = null;
+
+// ─── Bootstrap ───────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  buildApp();
+  window.addEventListener('blur', () => {
+    if (mode === 'braindump') setTimeout(() => HideWindow(), 200);
+  });
+});
+
+EventsOn('mode:capture', () => enterBraindump());
+EventsOn('mode:review',  () => enterReview());
+EventsOn('thought:classified', () => { if (mode === 'review') refreshGarden(); });
+
+function buildApp() {
+  document.getElementById('app').innerHTML = `
+    <div id="shell">
+      <div id="input-row">
+        <button id="back-btn" title="Back to capture" aria-label="Back to capture">&#8592;</button>
+        <input
+          id="thought-input"
+          type="text"
+          placeholder="What's on your mind…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <div id="garden-area" style="display:none"></div>
     </div>
-`;
+  `;
 
-const input = document.getElementById('search-input');
-const suggestionsContainer = document.getElementById('suggestions');
-const app = document.getElementById('app');
+  const input = document.getElementById('thought-input');
+  input.addEventListener('keydown', onInputKeydown);
+  input.addEventListener('input', onInputChange);
 
-let selectedIndex = -1;
+  document.getElementById('back-btn').addEventListener('click', () => ShowCapture());
 
-function updateSelection(shouldScroll = true) {
-    const items = suggestionsContainer.querySelectorAll('.suggestion-item');
-    items.forEach((item, index) => {
-        if (index === selectedIndex) {
-            item.classList.add('selected');
-            if (shouldScroll) {
-                item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-            }
-        } else {
-            item.classList.remove('selected');
-        }
-    });
+  input.focus();
 }
 
-// Focus handling
-window.focusInput = function () {
-    input.focus();
+// ─── Mode transitions ─────────────────────────────────────────────────────────
+
+function enterBraindump() {
+  mode = 'braindump';
+  document.getElementById('shell').dataset.mode = 'braindump';
+  document.getElementById('garden-area').style.display = 'none';
+  document.getElementById('garden-area').innerHTML = '';
+  const input = document.getElementById('thought-input');
+  if (input) { input.placeholder = 'What\'s on your mind…'; input.value = ''; input.focus(); }
+  SetCaptureHeight(60);
+}
+
+function enterReview() {
+  mode = 'review';
+  document.getElementById('shell').dataset.mode = 'review';
+  const gardenArea = document.getElementById('garden-area');
+  gardenArea.style.display = 'flex';
+  mountGarden(gardenArea);
+  const input = document.getElementById('thought-input');
+  if (input) { input.placeholder = 'Search garden…'; input.value = ''; input.focus(); }
+  refreshGarden();
+}
+
+// ─── Input ────────────────────────────────────────────────────────────────────
+
+async function onInputKeydown(e) {
+  const input = e.target;
+  const text = input.value.trim();
+
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    if (mode === 'review' && !text) {
+      ShowCapture();
+    } else {
+      HideWindow();
+    }
+    return;
+  }
+
+  if (e.key === 'Enter') {
+    e.preventDefault();
+
+    // Slash commands (both modes)
+    if (text === '/review') {
+      input.value = '';
+      ShowReview(); // Go resizes window and emits mode:review
+      return;
+    }
+
+    if (mode === 'braindump' || mode === 'review') {
+      if (!text || text.startsWith('/')) return;
+      input.value = '';
+      input.disabled = true;
+      try {
+        await SaveThought(text);
+        if (mode === 'review') await refreshGarden();
+      } catch (err) {
+        console.error('SaveThought failed:', err);
+        input.value = text;
+      } finally {
+        input.disabled = false;
+        input.focus();
+      }
+    }
+  }
+}
+
+function onInputChange() {
+  if (mode === 'review') {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(refreshGarden, 250);
+  }
+}
+
+// ─── Garden (review mode) ─────────────────────────────────────────────────────
+
+function mountGarden(container) {
+  selectedThoughtId = null;
+  reviewFilter = 'all';
+
+  container.innerHTML = `
+    <div id="review-layout">
+      <aside id="sidebar">
+        <nav id="sidebar-nav">
+          <button class="nav-btn active" data-filter="all">All</button>
+          <button class="nav-btn" data-filter="todo">To-do</button>
+          <button class="nav-btn" data-filter="idea">Ideas</button>
+          <button class="nav-btn" data-filter="calendar">Calendar</button>
+          <button class="nav-btn" data-filter="reminder">Reminders</button>
+        </nav>
+      </aside>
+      <main id="stream"></main>
+      <aside id="inspector"></aside>
+    </div>
+  `;
+
+  document.querySelectorAll('.nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      reviewFilter = btn.dataset.filter;
+      refreshGarden();
+    });
+  });
+}
+
+async function refreshGarden() {
+  const query = document.getElementById('thought-input')?.value.trim() || '';
+  try {
+    const all = await SearchThoughts(query);
+    reviewThoughts = (all || []).filter(t => {
+      if (reviewFilter === 'all') return true;
+      return (t.tags || []).some(tag => tag.name === reviewFilter);
+    });
+  } catch (e) {
+    console.error('refreshGarden failed:', e);
+    reviewThoughts = [];
+  }
+  renderStream();
+}
+
+function renderStream() {
+  const stream = document.getElementById('stream');
+  if (!stream) return;
+
+  if (reviewThoughts.length === 0) {
+    stream.innerHTML = `<div class="empty-state">No thoughts yet.<br>Start capturing with <kbd>Ctrl+Shift+Space</kbd>.</div>`;
+    return;
+  }
+
+  const query = document.getElementById('thought-input')?.value.trim() || '';
+  stream.innerHTML = reviewThoughts.map(t => {
+    const content = query ? highlight(t.content, query) : escapeHtml(t.content);
+    const isSelected = t.id === selectedThoughtId;
+    return `
+      <div class="stream-item${isSelected ? ' selected' : ''}" data-id="${t.id}">
+        <div class="stream-content">${content}</div>
+        <div class="stream-footer">
+          ${renderTags(t.tags || [])}
+          <span class="stream-time">${formatRelativeTime(t.created_at)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  stream.querySelectorAll('.stream-item').forEach(el => {
+    el.addEventListener('click', () => selectThought(Number(el.dataset.id)));
+  });
+}
+
+async function selectThought(id) {
+  selectedThoughtId = id;
+  renderStream();
+  try {
+    const t = await GetThought(id);
+    renderInspector(t);
+  } catch (_) {
+    renderInspector(null);
+  }
+}
+
+function renderInspector(t) {
+  const inspector = document.getElementById('inspector');
+  if (!inspector) return;
+  if (!t) { inspector.innerHTML = ''; return; }
+
+  const shadowSection = t.content !== t.raw_content ? `
+    <div class="inspector-section shadow-section">
+      <label class="inspector-label">Original (shadow record)</label>
+      <div class="shadow-text">${escapeHtml(t.raw_content)}</div>
+    </div>
+  ` : '';
+
+  const contextSection = t.context && (t.context.app_name || t.context.window_title) ? `
+    <div class="inspector-section">
+      <label class="inspector-label">Context</label>
+      <div class="context-info">
+        ${t.context.app_name ? `<span class="ctx-app">${escapeHtml(t.context.app_name)}</span>` : ''}
+        ${t.context.window_title ? `<span class="ctx-window">${escapeHtml(t.context.window_title)}</span>` : ''}
+      </div>
+    </div>
+  ` : '';
+
+  inspector.innerHTML = `
+    <div id="inspector-inner">
+      <div class="inspector-section">
+        <label class="inspector-label">Content</label>
+        <textarea id="inspector-content" rows="6">${escapeHtml(t.content)}</textarea>
+      </div>
+      ${shadowSection}
+      <div class="inspector-section">
+        <label class="inspector-label">Tags</label>
+        <div>${renderTags(t.tags || [])}</div>
+      </div>
+      ${contextSection}
+      <div class="inspector-actions">
+        <button id="btn-save-edit" class="btn-primary">Save</button>
+        <button id="btn-delete" class="btn-danger">Delete</button>
+      </div>
+      <div class="inspector-times">
+        <span>Created ${formatAbsoluteTime(t.created_at)}</span>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('btn-save-edit').addEventListener('click', async () => {
+    const newContent = document.getElementById('inspector-content').value.trim();
+    if (!newContent || newContent === t.content) return;
+    try {
+      const updated = await UpdateThought(t.id, newContent);
+      const idx = reviewThoughts.findIndex(x => x.id === t.id);
+      if (idx !== -1) reviewThoughts[idx] = updated;
+      renderStream();
+      renderInspector(updated);
+    } catch (e) { console.error(e); }
+  });
+
+  document.getElementById('btn-delete').addEventListener('click', async () => {
+    if (!confirm('Delete this thought? This cannot be undone.')) return;
+    try {
+      await DeleteThought(t.id);
+      selectedThoughtId = null;
+      inspector.innerHTML = '';
+      reviewThoughts = reviewThoughts.filter(x => x.id !== t.id);
+      renderStream();
+    } catch (e) { console.error(e); }
+  });
+}
+
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+const TAG_COLORS = {
+  todo:      '#ff6464',
+  idea:      '#64c8ff',
+  calendar:  '#ffc864',
+  reminder:  '#ff64ff',
+  question:  '#aaffaa',
+  quote:     '#aaaaaa',
+  finance:   '#ffd700',
 };
 
-window.addEventListener('focus', () => {
-    window.focusInput();
-});
-
-// Dynamic Resizing
-function updateWindowHeight() {
-    // We add some buffer for safe measure, e.g. padding-top of body (10px) + app padding (10px*2) + border?
-    // app.offsetHeight includes app's padding and border.
-    // body has padding-top: 10px.
-    // So total height = app.offsetHeight + 10 (body padding).
-    // Let's also add a tiny bit of buffer (e.g. 2px) to prevent scrollbars.
-    const height = app.offsetHeight + 12;
-    SetWindowHeight(height);
+function renderTags(tags) {
+  if (!tags || tags.length === 0) return '';
+  return tags.map(tag => {
+    const color = TAG_COLORS[tag.name] || '#888';
+    const border = tag.source === 'ai' ? 'dashed' : 'solid';
+    return `<span class="tag" style="border:1px ${border} ${color};color:${color}">${escapeHtml(tag.name)}</span>`;
+  }).join('');
 }
 
-// Render suggestions
-function renderSuggestions(thoughts, query) {
-    selectedIndex = -1;
-    suggestionsContainer.innerHTML = '';
-    if (!thoughts || thoughts.length === 0) {
-        suggestionsContainer.style.display = 'none';
-        updateWindowHeight();
-        return;
-    }
-
-    suggestionsContainer.style.display = 'block';
-    const containerDiv = document.createElement('div');
-    containerDiv.className = 'suggestions-list-container';
-
-    let lastTime = null;
-    let currentGroupUl = null;
-
-    thoughts.forEach(t => {
-        const tTime = new Date(t.created_at);
-
-        // Grouping Logic: > 30 mins difference starts a new group
-        // If sorting DESC, we compare with previous item time.
-        // First item always starts a group.
-        let startNewGroup = false;
-        if (!lastTime) {
-            startNewGroup = true;
-        } else {
-            const diffMs = Math.abs(lastTime - tTime);
-            const diffMins = diffMs / (1000 * 60);
-            if (diffMins > 30) {
-                startNewGroup = true;
-            }
-        }
-
-        if (startNewGroup) {
-            if (currentGroupUl) {
-                containerDiv.appendChild(currentGroupUl);
-            }
-            // Add a visual separator or header if needed, but for now just a new list or gap
-            // Using a simple gap via CSS on the list
-            currentGroupUl = document.createElement('ul');
-            currentGroupUl.className = 'suggestions-list session-group';
-            lastTime = tTime;
-
-            // Optional: Header for the group?
-            // User asked for "grouped", maybe a visual indicator.
-            // Let's add a small divider or margin in CSS.
-        }
-
-        // Update lastTime to current time so we chain them? 
-        // Actually for correct "session", if items are within window of EACH OTHER or window of FIRST item?
-        // Usually "session" implies interaction flow. If I type entries 1 min apart for an hour, is it one session? Yes.
-        // So we should compare with the PREVIOUS item.
-        lastTime = tTime;
-
-        const li = document.createElement('li');
-        li.className = 'suggestion-item';
-
-        // Content
-        const content = t.content;
-        let highlighted = content;
-        if (query && query.trim() !== "") {
-            const regex = new RegExp(`(${query})`, 'gi');
-            highlighted = content.replace(regex, '<span class="highlight">$1</span>');
-        }
-
-        // Tags
-        let tagsHtml = '';
-        if (t.tags && t.tags.length > 0) {
-            tagsHtml = '<div class="tags-container">';
-            t.tags.forEach(tag => {
-                tagsHtml += `<span class="tag tag-${tag.toLowerCase()}">${tag}</span>`;
-            });
-            tagsHtml += '</div>';
-        }
-
-        li.innerHTML = `<div class="suggestion-content">${highlighted}</div>${tagsHtml}`;
-
-        // Mouse hover selection
-        li.addEventListener('mouseenter', () => {
-            selectedIndex = Array.from(containerDiv.querySelectorAll('.suggestion-item')).indexOf(li);
-            // Wait, we need the global index across multiple uls?
-            // `containerDiv` contains multiple ULs if grouped.
-            // `Array.from(suggestionsContainer.querySelectorAll('.suggestion-item'))` is better.
-            const allItems = suggestionsContainer.querySelectorAll('.suggestion-item');
-            allItems.forEach((item, idx) => {
-                if (item === li) {
-                    selectedIndex = idx;
-                    updateSelection(false); // Don't scroll on hover
-                }
-            });
-        });
-
-        currentGroupUl.appendChild(li);
-    });
-
-    if (currentGroupUl) {
-        containerDiv.appendChild(currentGroupUl);
-    }
-
-    suggestionsContainer.appendChild(containerDiv);
-    updateWindowHeight();
+function escapeHtml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// Hide on Esc, Save on Enter, Search on Input
-input.addEventListener('keydown', (e) => {
-    const items = suggestionsContainer.querySelectorAll('.suggestion-item');
-
-    if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (items.length > 0) {
-            selectedIndex = (selectedIndex + 1) % items.length;
-            updateSelection();
-        }
-    } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (items.length > 0) {
-            selectedIndex = (selectedIndex - 1 + items.length) % items.length;
-            updateSelection();
-        }
-    } else if (e.key === 'Escape') {
-        if (input.value !== "") {
-            input.value = "";
-            Search("").then(renderSuggestions).catch(console.error);
-            e.preventDefault();
-        } else {
-            Hide();
-        }
-    } else if (e.key === 'Enter') {
-        // Check if item selected
-        if (selectedIndex >= 0 && items[selectedIndex]) {
-            e.preventDefault();
-            const selectedItem = items[selectedIndex];
-
-            // If it's a command
-            if (selectedItem.classList.contains('command-item')) {
-                const cmdText = selectedItem.querySelector('.command-text').textContent;
-                // Set input and Execute
-                input.value = cmdText;
-                Save(cmdText).then(() => {
-                    input.value = "";
-                    Search("").then(renderSuggestions).catch(console.error);
-                }).catch(console.error);
-                return;
-            } else {
-                // If it's a thought/history item
-                // Just autofill for now? Or Copy?
-                // Standard history behavior: Fill input.
-                // We need the raw content. The HTML might have tags.
-                // Extracting text from highlighted content is messy.
-                // Better to bind click handler or store data attribute.
-                // Let's rely on standard textContent of `.suggestion-content` for now, 
-                // but that includes highlight spans. `.textContent` strips tags so it's fine!
-                const text = selectedItem.querySelector('.suggestion-content').textContent;
-                input.value = text;
-                return;
-            }
-        }
-
-        const val = input.value;
-        if (val && val.trim() !== "") {
-            Save(val).then(() => {
-                input.value = "";
-                Search("").then(renderSuggestions).catch(console.error);
-            }).catch((err) => {
-                console.error("Failed to save:", err);
-            });
-        }
-    }
-});
-
-const commands = [
-    { command: "/config show-recent true", description: "Enable showing recent entries" },
-    { command: "/config show-recent false", description: "Disable showing recent entries" },
-    { command: "/config backfill-tags", description: "Backfill tags for existing entries" }
-];
-
-function renderCommandSuggestions(inputVal) {
-    selectedIndex = -1;
-    const matched = commands.filter(c => c.command.startsWith(inputVal));
-
-    suggestionsContainer.innerHTML = '';
-    if (!matched || matched.length === 0) {
-        suggestionsContainer.style.display = 'none';
-        updateWindowHeight();
-        return;
-    }
-
-    suggestionsContainer.style.display = 'block';
-    const containerDiv = document.createElement('div');
-    containerDiv.className = 'suggestions-list-container';
-    const ul = document.createElement('ul');
-    ul.className = 'suggestions-list';
-
-    matched.forEach(c => {
-        const li = document.createElement('li');
-        li.className = 'suggestion-item command-item';
-        // Highlight match
-        const content = c.command;
-        let highlighted = content;
-        if (inputVal && inputVal.trim() !== "") {
-            // Escape special chars in inputVal for regex if needed, currently "/" is safe enough usually
-            const regex = new RegExp(`(${inputVal})`, 'i'); // just first match?
-            highlighted = content.replace(regex, '<span class="highlight">$1</span>');
-        }
-
-        li.innerHTML = `
-            <div class="suggestion-content">
-                <div class="command-text">${highlighted}</div>
-                <div class="command-desc">${c.description}</div>
-            </div>
-        `;
-
-        // Click to autofill/execute
-        li.addEventListener('click', () => {
-            input.value = c.command;
-            input.focus();
-            // Optional: Auto-submit?
-            // Save(c.command)...
-        });
-
-        // Mouse hover selection
-        li.addEventListener('mouseenter', () => {
-            // Since commands are one list, index is simple match index
-            const allItems = suggestionsContainer.querySelectorAll('.suggestion-item');
-            allItems.forEach((item, idx) => {
-                if (item === li) {
-                    selectedIndex = idx;
-                    updateSelection(false);
-                }
-            });
-        });
-
-        ul.appendChild(li);
-    });
-
-    containerDiv.appendChild(ul);
-    suggestionsContainer.appendChild(containerDiv);
-    updateWindowHeight();
+function highlight(text, query) {
+  const safe = escapeHtml(text);
+  const re = new RegExp(escapeHtml(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  return safe.replace(re, m => `<mark>${m}</mark>`);
 }
 
-input.addEventListener('input', () => {
-    const val = input.value;
-    if (val.startsWith('/')) {
-        renderCommandSuggestions(val);
-        return;
-    }
+function formatRelativeTime(isoStr) {
+  if (!isoStr) return '';
+  const diff = Date.now() - new Date(isoStr).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
 
-    // Always search, even if empty (backend handles config)
-    Search(val).then((thoughts) => {
-        renderSuggestions(thoughts, val);
-    }).catch((err) => {
-        // If error (e.g. empty search and config off returns nil, wails handles it as null/empty array usually)
-        // Actually verify what Search returns when nil. Wails usually returns null.
-        console.error("Search failed:", err);
-        renderSuggestions([], val);
-    });
-});
-
-// Hide on Blur
-let hideTimeout;
-window.addEventListener('blur', () => {
-    hideTimeout = setTimeout(() => {
-        Hide();
-    }, 200); // 200ms grace period
-});
-
-window.addEventListener('focus', () => {
-    if (hideTimeout) {
-        clearTimeout(hideTimeout);
-        hideTimeout = null;
-    }
-    input.focus();
-
-    if (input.value.startsWith('/')) {
-        renderCommandSuggestions(input.value);
-        return;
-    }
-
-    // Trigger search on focus to show recent entries if configured
-    Search(input.value).then((thoughts) => {
-        renderSuggestions(thoughts, input.value);
-    }).catch(console.error);
-});
-
-// Initial focus and resize
-input.focus();
-setTimeout(() => {
-    updateWindowHeight();
-    // Also trigger initial search
-    Search(input.value).then((thoughts) => {
-        renderSuggestions(thoughts, input.value);
-    }).catch(console.error);
-}, 10);
+function formatAbsoluteTime(isoStr) {
+  if (!isoStr) return '';
+  return new Date(isoStr).toLocaleString(undefined, {
+    month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}

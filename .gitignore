@@ -2,3 +2,14 @@
 build/bin
 node_modules
 frontend/dist
+
+# Compiled binaries
+thawts-client
+thawts-client.exe
+
+# ML model weights (large files, not versioned)
+valhalla/
+typeform/
+internal/app/valhalla/
+internal/app/typeform/
+internal/tray/typeform/

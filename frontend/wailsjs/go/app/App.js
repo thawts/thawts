@@ -6,50 +6,58 @@ export function Context() {
   return window['go']['app']['App']['Context']();
 }
 
-export function ExportThoughts() {
-  return window['go']['app']['App']['ExportThoughts']();
+export function DeleteThought(arg1) {
+  return window['go']['app']['App']['DeleteThought'](arg1);
 }
 
-export function Greet(arg1) {
-  return window['go']['app']['App']['Greet'](arg1);
+export function GetRecentThoughts(arg1) {
+  return window['go']['app']['App']['GetRecentThoughts'](arg1);
 }
 
-export function Hide() {
-  return window['go']['app']['App']['Hide']();
+export function GetThought(arg1) {
+  return window['go']['app']['App']['GetThought'](arg1);
 }
 
-export function ImportThoughts() {
-  return window['go']['app']['App']['ImportThoughts']();
+export function HideWindow() {
+  return window['go']['app']['App']['HideWindow']();
 }
 
 export function Quit() {
   return window['go']['app']['App']['Quit']();
 }
 
-export function Save(arg1) {
-  return window['go']['app']['App']['Save'](arg1);
+export function SaveThought(arg1) {
+  return window['go']['app']['App']['SaveThought'](arg1);
 }
 
-export function Search(arg1) {
-  return window['go']['app']['App']['Search'](arg1);
+export function SearchThoughts(arg1) {
+  return window['go']['app']['App']['SearchThoughts'](arg1);
+}
+
+export function SetCaptureHeight(arg1) {
+  return window['go']['app']['App']['SetCaptureHeight'](arg1);
 }
 
 export function SetTestMode(arg1) {
   return window['go']['app']['App']['SetTestMode'](arg1);
 }
 
-export function SetWindowHeight(arg1) {
-  return window['go']['app']['App']['SetWindowHeight'](arg1);
+export function ShowCapture() {
+  return window['go']['app']['App']['ShowCapture']();
 }
 
-export function Show() {
-  return window['go']['app']['App']['Show']();
+export function ShowReview() {
+  return window['go']['app']['App']['ShowReview']();
 }
 
 export function Startup(arg1) {
   return window['go']['app']['App']['Startup'](arg1);
 }
 
-export function Toggle() {
-  return window['go']['app']['App']['Toggle']();
+export function ToggleCapture() {
+  return window['go']['app']['App']['ToggleCapture']();
+}
+
+export function UpdateThought(arg1, arg2) {
+  return window['go']['app']['App']['UpdateThought'](arg1, arg2);
 }

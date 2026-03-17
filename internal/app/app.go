@@ -1,365 +1,197 @@
+// Package app contains the Wails-bound application struct.
 package app
 
 import (
 	"context"
-	"encoding/csv"
-	"fmt"
-	"os"
-	"path/filepath"
-
-	"sync"
-	"thawts-client/internal/classifier"
-	"thawts-client/internal/storage"
+	"log"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"thawts-client/internal/ai"
+	"thawts-client/internal/domain"
+	"thawts-client/internal/metadata"
+	"thawts-client/internal/storage"
 )
 
-// App struct
+const (
+	captureWidth  = 800
+	captureHeight = 60
+	reviewWidth   = 1200
+	reviewHeight  = 750
+)
+
+// App is the Wails application struct. All exported methods are callable from
+// the frontend via the generated JS bindings.
 type App struct {
-	ctx        context.Context
-	storage    *storage.Service
-	classifier classifier.Classifier
-
-	// Interaction state
-	interactLock  sync.Mutex
-	isInteracting bool
-	isVisible     bool
-
-	// Test mode (to skip runtime calls)
-	testMode bool
-
-	// Configuration
-	showRecent bool
+	ctx      context.Context
+	store    storage.Storage
+	ai       ai.Provider
+	meta     metadata.Provider
+	testMode bool // disables runtime calls during unit tests
 }
 
-// SetTestMode enables or disables test mode
-func (a *App) SetTestMode(enabled bool) {
-	a.testMode = enabled
-}
-
-// NewApp creates a new App application struct
-func NewApp(storageService *storage.Service) *App {
-	// Load config
-	val, _ := storageService.GetMetadata("show_recent")
-	showRecent := val == "true" // Default false if missing or error
-
+// NewApp constructs the App with its dependencies injected.
+func NewApp(store storage.Storage, aiProvider ai.Provider, metaProvider metadata.Provider) *App {
 	return &App{
-		storage:    storageService,
-		classifier: classifier.NewRegexClassifier(),
-		showRecent: showRecent,
+		store: store,
+		ai:    aiProvider,
+		meta:  metaProvider,
 	}
 }
 
-// Startup is called when the app starts. The context is saved
-// so we can call the runtime methods
+// Startup is called by Wails once the application context is ready.
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
+// Context returns the Wails runtime context (used by main.go for menu callbacks).
 func (a *App) Context() context.Context {
 	return a.ctx
 }
 
-// Save saves the thought to local storage
-func (a *App) Save(text string) error {
-	if text == "" {
-		return nil
+// Quit shuts down the application.
+func (a *App) Quit() {
+	if !a.testMode {
+		runtime.Quit(a.ctx)
+	}
+}
+
+// SetTestMode disables Wails runtime calls so methods can be tested without a
+// running Wails instance.
+func (a *App) SetTestMode(v bool) {
+	a.testMode = v
+}
+
+// --- Capture ---
+
+// SaveThought persists a thought, then classifies it asynchronously.
+// Returns the saved thought immediately (before classification completes).
+func (a *App) SaveThought(content string) (*domain.Thought, error) {
+	ctx := domain.CaptureContext{
+		WindowTitle: a.meta.GetActiveWindowTitle(),
+		AppName:     a.meta.GetActiveAppName(),
+		URL:         a.meta.GetActiveURL(),
 	}
 
-	// Helper for config
-	if len(text) > 8 && text[:8] == "/config " {
-		// Parse config
-		// For now only "show-recent true/false"
-		if text == "/config show-recent true" {
-			a.showRecent = true
-			a.storage.SetMetadata("show_recent", "true")
-			return nil
-		} else if text == "/config show-recent false" {
-			a.showRecent = false
-			a.storage.SetMetadata("show_recent", "false")
-			return nil
-		}
-
-		if text == "/config backfill-tags" {
-			thoughts, err := a.storage.GetAllThoughts()
-			if err != nil {
-				return err
-			}
-			count := 0
-			for _, t := range thoughts {
-				tags := a.classifier.Classify(t.Content)
-				if len(tags) > 0 {
-					for _, tag := range tags {
-						// This might duplicate tags if run multiple times without checking existence.
-						// DB constraint is not unique on (thought_id, name) yet?
-						// Let's assume AddTag just inserts. We should make it ignore duplicates or delete existing first?
-						// For simple backfill, let's just insert. If duplicates -> whatever for now or upgrade AddTag.
-						// Actually, `initSchema` does not set UNIQUE on tags.
-						// To be safe, we could delete existing tags for this thought or just ignore errors.
-						a.storage.AddTag(t.ID, tag, "regex_backfill")
-					}
-					count++
-				}
-			}
-			runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
-				Type:    runtime.InfoDialog,
-				Title:   "Backfill Complete",
-				Message: fmt.Sprintf("Processed %d thoughts. Tagged %d entries.", len(thoughts), count),
-			})
-			return nil
-		}
-
-		// Unknown config
-		return fmt.Errorf("unknown config command")
-	}
-
-	id, err := a.storage.SaveThought(text)
+	thought, err := a.store.SaveThought(content, ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// Classify and Tag
-	tags := a.classifier.Classify(text)
-	for _, tag := range tags {
-		if err := a.storage.AddTag(id, tag, "regex"); err != nil {
-			// Log error but don't fail the save
-			fmt.Printf("Failed to add tag %s: %v\n", tag, err)
+	// Classify in the background so the UI is never blocked.
+	go a.classifyAsync(thought.ID, content)
+
+	return thought, nil
+}
+
+func (a *App) classifyAsync(id int64, content string) {
+	classification, err := a.ai.ClassifyThought(content)
+	if err != nil {
+		log.Printf("classifyAsync: %v", err)
+		return
+	}
+	for _, tag := range classification.Tags {
+		if err := a.store.AddTag(id, tag.Name, "ai", tag.Confidence); err != nil {
+			log.Printf("addTag %q: %v", tag.Name, err)
 		}
 	}
-	// a.Hide() - User wants app to stay open for multiple entries
-	return nil
+	// Notify the frontend that the thought has been enriched.
+	if !a.testMode && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "thought:classified", id)
+	}
 }
 
-// Greet returns a greeting for the given name
-func (a *App) Greet(name string) string {
-	return fmt.Sprintf("Hello %s, It's show time!", name)
+// --- Retrieval ---
+
+// GetRecentThoughts returns the N most recently saved thoughts.
+func (a *App) GetRecentThoughts(limit int) ([]*domain.Thought, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	return a.store.GetRecentThoughts(limit)
 }
 
-func (a *App) Hide() {
+// SearchThoughts returns thoughts matching the query string.
+// When query is empty, returns the 20 most recent thoughts.
+func (a *App) SearchThoughts(query string) ([]*domain.Thought, error) {
+	if query == "" {
+		return a.store.GetRecentThoughts(20)
+	}
+	return a.store.SearchThoughts(query, 20)
+}
+
+// --- Review Mode actions ---
+
+// UpdateThought edits the visible content of a thought.
+// The original text (shadow record) is preserved.
+func (a *App) UpdateThought(id int64, content string) (*domain.Thought, error) {
+	return a.store.UpdateThought(id, content)
+}
+
+// DeleteThought removes a thought permanently.
+func (a *App) DeleteThought(id int64) error {
+	return a.store.DeleteThought(id)
+}
+
+// GetThought returns a single thought by ID.
+func (a *App) GetThought(id int64) (*domain.Thought, error) {
+	return a.store.GetThought(id)
+}
+
+// --- Window / Mode control ---
+
+// ShowCapture switches to capture mode: small frameless bar, always on top.
+// Preserves the current window position so the input bar doesn't jump.
+func (a *App) ShowCapture() {
 	if a.testMode {
-		a.isVisible = false
 		return
 	}
-	a.interactLock.Lock()
-	if a.isInteracting {
-		a.interactLock.Unlock()
-		return
-	}
-	a.interactLock.Unlock()
+	x, y := runtime.WindowGetPosition(a.ctx)
+	runtime.WindowSetSize(a.ctx, captureWidth, captureHeight)
+	runtime.WindowSetPosition(a.ctx, x, y)
+	runtime.WindowSetAlwaysOnTop(a.ctx, true)
+	runtime.WindowShow(a.ctx)
+	runtime.EventsEmit(a.ctx, "mode:capture")
+}
 
-	a.isVisible = false
+// ShowReview switches to review mode: larger window, standard chrome.
+// Preserves the current window position so the input bar doesn't jump.
+func (a *App) ShowReview() {
+	if a.testMode {
+		return
+	}
+	x, y := runtime.WindowGetPosition(a.ctx)
+	runtime.WindowSetSize(a.ctx, reviewWidth, reviewHeight)
+	runtime.WindowSetPosition(a.ctx, x, y)
+	runtime.WindowSetAlwaysOnTop(a.ctx, false)
+	runtime.WindowShow(a.ctx)
+	runtime.EventsEmit(a.ctx, "mode:review")
+}
+
+// HideWindow hides the application window.
+func (a *App) HideWindow() {
+	if a.testMode {
+		return
+	}
 	runtime.WindowHide(a.ctx)
 }
 
-func (a *App) Show() {
+// ToggleCapture shows capture mode centered on screen (initial appearance via hotkey).
+func (a *App) ToggleCapture() {
 	if a.testMode {
-		a.isVisible = true
 		return
 	}
-	a.isVisible = true
-	// Force unminimise/restore logic for Windows to ensure it grabs attention
-	runtime.WindowUnminimise(a.ctx)
-	runtime.WindowShow(a.ctx)
+	runtime.WindowSetSize(a.ctx, captureWidth, captureHeight)
 	runtime.WindowSetAlwaysOnTop(a.ctx, true)
-	// Emit event for frontend to focus input
-	runtime.EventsEmit(a.ctx, "window-shown")
+	runtime.WindowCenter(a.ctx)
+	runtime.WindowShow(a.ctx)
+	runtime.EventsEmit(a.ctx, "mode:capture")
 }
 
-func (a *App) Toggle() {
-	if a.isVisible {
-		a.Hide()
-	} else {
-		a.Show()
-	}
-}
-
-func (a *App) Quit() {
+// SetCaptureHeight resizes the capture window height as the thought list grows.
+func (a *App) SetCaptureHeight(h int) {
 	if a.testMode {
 		return
 	}
-	runtime.Quit(a.ctx)
-}
-
-// Search returns thoughts matching the query
-func (a *App) Search(query string) []storage.Thought {
-	if query == "" {
-		if a.showRecent {
-			thoughts, err := a.storage.GetRecentThoughts(20)
-			if err != nil {
-				return nil
-			}
-			return thoughts
-		}
-		return nil
-	}
-	thoughts, err := a.storage.SearchThoughts(query)
-	if err != nil {
-		// Log error if needed, but for now just return nil/empty
-		return nil
-	}
-	return thoughts
-}
-
-// SetWindowHeight sets the window height
-func (a *App) SetWindowHeight(height int) {
-	if a.testMode {
-		return
-	}
-	width, _ := runtime.WindowGetSize(a.ctx)
-	runtime.WindowSetSize(a.ctx, width, height)
-}
-
-// ExportThoughts handles the export workflow
-func (a *App) ExportThoughts() {
-	// Interaction Start
-	a.interactLock.Lock()
-	a.isInteracting = true
-	a.interactLock.Unlock()
-
-	defer func() {
-		a.interactLock.Lock()
-		a.isInteracting = false
-		a.interactLock.Unlock()
-	}()
-
-	// Ensure Visible
-	if !a.testMode {
-		runtime.WindowShow(a.ctx)
-	}
-
-	// Select File
-	if a.testMode {
-		// Mock file selection in test mode if needed, or just return/error
-		// For now, let's just return to avoid runtime panic
-		return
-	}
-	file, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "Export Data",
-		DefaultFilename: "thawts_export.json",
-		Filters: []runtime.FileFilter{
-			{DisplayName: "JSON Files (*.json)", Pattern: "*.json"},
-			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
-		},
-	})
-	if err != nil || file == "" {
-		return
-	}
-
-	f, err := os.Create(file)
-	if err != nil {
-		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
-			Type:    runtime.ErrorDialog,
-			Title:   "Export Failed",
-			Message: err.Error(),
-		})
-		return
-	}
-	defer f.Close()
-
-	ext := filepath.Ext(file)
-	if ext == ".csv" {
-		w := csv.NewWriter(f)
-		err = a.storage.ExportCSV(w)
-	} else {
-		// Default to JSON
-		err = a.storage.ExportJSONToWriter(f)
-	}
-
-	if err != nil {
-		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
-			Type:    runtime.ErrorDialog,
-			Title:   "Export Failed",
-			Message: err.Error(),
-		})
-	} else {
-		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
-			Type:    runtime.InfoDialog,
-			Title:   "Export Successful",
-			Message: "Your thoughts have been exported.",
-		})
-	}
-}
-
-// ImportThoughts handles the import workflow
-func (a *App) ImportThoughts() {
-	// Interaction Start
-	a.interactLock.Lock()
-	a.isInteracting = true
-	a.interactLock.Unlock()
-
-	defer func() {
-		a.interactLock.Lock()
-		a.isInteracting = false
-		a.interactLock.Unlock()
-	}()
-
-	// Ensure Visible
-	if !a.testMode {
-		runtime.WindowShow(a.ctx)
-	}
-
-	// Select File
-	if a.testMode {
-		return
-	}
-	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Import Data",
-		Filters: []runtime.FileFilter{
-			{DisplayName: "Data Files (*.json;*.csv)", Pattern: "*.json;*.csv"},
-		},
-	})
-	if err != nil || file == "" {
-		return
-	}
-
-	// Ask to Remove Existing
-	selection, err := runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
-		Type:          runtime.QuestionDialog,
-		Title:         "Import Options",
-		Message:       "Do you want to clear existing data before importing?",
-		Buttons:       []string{"Yes, Clear Data", "No, Append"},
-		DefaultButton: "No, Append",
-		CancelButton:  "Cancel",
-	})
-
-	removeExisting := false
-	if selection == "Yes, Clear Data" {
-		removeExisting = true
-	} else if selection != "No, Append" {
-		// Cancelled?
-		return
-	}
-
-	f, err := os.Open(file)
-	if err != nil {
-		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
-			Type:    runtime.ErrorDialog,
-			Title:   "Import Failed",
-			Message: err.Error(),
-		})
-		return
-	}
-	defer f.Close()
-
-	ext := filepath.Ext(file)
-	if ext == ".csv" {
-		r := csv.NewReader(f)
-		err = a.storage.ImportCSV(r, removeExisting)
-	} else {
-		err = a.storage.ImportJSON(f, removeExisting)
-	}
-
-	if err != nil {
-		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
-			Type:    runtime.ErrorDialog,
-			Title:   "Import Failed",
-			Message: err.Error(),
-		})
-	} else {
-		runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
-			Type:    runtime.InfoDialog,
-			Title:   "Import Successful",
-			Message: "Your thoughts have been imported.",
-		})
-	}
+	runtime.WindowSetSize(a.ctx, captureWidth, h)
 }

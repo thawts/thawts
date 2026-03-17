@@ -14,80 +14,43 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"golang.design/x/hotkey"
 
+	"thawts-client/internal/ai"
 	"thawts-client/internal/app"
+	"thawts-client/internal/metadata"
 	"thawts-client/internal/storage"
 	"thawts-client/internal/tray"
-
-	"golang.design/x/hotkey"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/appicon.png
+var appIcon []byte
+
 func main() {
-	// Initialize Storage
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatal(err)
 	}
-	dbPath := filepath.Join(homeDir, ".thawts", "thawts.db")
 
-	store, err := storage.NewService(dbPath)
+	store, err := storage.NewSQLiteStorage(filepath.Join(homeDir, ".thawts", "thawts.db"))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer store.Close()
 
-	// Create an instance of the app structure
-	application := app.NewApp(store)
+	application := app.NewApp(
+		store,
+		ai.NewStubProvider(),
+		metadata.NewStubProvider(),
+	)
 
-	// Create Application Menu
-	appMenu := menu.NewMenu()
+	appMenu := buildMenu(application)
 
-	// App Menu (macOS standard)
-	FileMenu := appMenu.AddSubmenu("File")
-	FileMenu.AddText("Show Thawts", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
-		application.Show()
-	})
-	FileMenu.AddSeparator()
-	FileMenu.AddText("Quit", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
-		runtime.Quit(application.Context()) // Wait, we need to access context or just use Quit method?
-		// app.Quit() wraps runtime.Quit(a.ctx)
-		application.Quit()
-	})
-
-	// Edit Menu (Standard)
-	EditMenu := appMenu.AddSubmenu("Edit")
-	EditMenu.AddText("Undo", keys.CmdOrCtrl("z"), func(_ *menu.CallbackData) {
-		runtime.WindowExecJS(application.Context(), "document.execCommand('undo')")
-	})
-	EditMenu.AddText("Redo", keys.CmdOrCtrl("y"), func(_ *menu.CallbackData) {
-		runtime.WindowExecJS(application.Context(), "document.execCommand('redo')")
-	})
-	EditMenu.AddSeparator()
-	EditMenu.AddText("Cut", keys.CmdOrCtrl("x"), func(_ *menu.CallbackData) { runtime.WindowExecJS(application.Context(), "document.execCommand('cut')") })
-	EditMenu.AddText("Copy", keys.CmdOrCtrl("c"), func(_ *menu.CallbackData) {
-		runtime.WindowExecJS(application.Context(), "document.execCommand('copy')")
-	})
-	EditMenu.AddText("Paste", keys.CmdOrCtrl("v"), func(_ *menu.CallbackData) {
-		runtime.WindowExecJS(application.Context(), "document.execCommand('paste')")
-	})
-	EditMenu.AddText("Select All", keys.CmdOrCtrl("a"), func(_ *menu.CallbackData) {
-		runtime.WindowExecJS(application.Context(), "document.execCommand('selectAll')")
-	})
-
-	// Data Menu
-	DataMenu := appMenu.AddSubmenu("Data")
-	DataMenu.AddText("Export Data...", nil, func(_ *menu.CallbackData) {
-		application.ExportThoughts()
-	})
-	DataMenu.AddText("Import Data...", nil, func(_ *menu.CallbackData) {
-		application.ImportThoughts()
-	})
-	// Create application with options
 	err = wails.Run(&options.App{
-		Title:       "thawts-client",
+		Title:       "Thawts",
 		Width:       800,
 		Height:      60,
 		Frameless:   true,
@@ -96,45 +59,86 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
+		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 255},
 		OnStartup: func(ctx context.Context) {
 			application.Startup(ctx)
 			runtime.WindowHide(ctx)
 
-			// Init Tray
-			tray.RegisterApp(application)
-			tray.InitTray()
+			tray.Init(application, appIcon)
 
-			// Register hotkey: Ctrl+Shift+Space
-			go func() {
-				hk := hotkey.New([]hotkey.Modifier{hotkey.ModCtrl, hotkey.ModShift}, hotkey.KeySpace)
-				if err := hk.Register(); err != nil {
-					log.Println("failed to register hotkey:", err)
-					return
-				}
-				for range hk.Keydown() {
-					application.Toggle()
-				}
-			}()
+			// Ctrl+Shift+Space → toggle capture mode
+			go registerHotkey(
+				[]hotkey.Modifier{hotkey.ModShift, hotkey.ModCtrl},
+				hotkey.KeySpace,
+				application.ToggleCapture,
+			)
+
+			// Cmd+Option+R → open review mode
+			go registerHotkey(
+				[]hotkey.Modifier{hotkey.ModCmd, hotkey.ModOption},
+				hotkey.KeyR,
+				application.ShowReview,
+			)
 		},
-		Bind: []interface{}{
-			application,
-		},
+		Bind: []interface{}{application},
 		Mac: &mac.Options{
 			TitleBar:             mac.TitleBarHidden(),
 			Appearance:           mac.NSAppearanceNameDarkAqua,
-			WebviewIsTransparent: true,
-			WindowIsTranslucent:  false, // Disable translucency for pitch black
+			WebviewIsTransparent: false,
+			WindowIsTranslucent:  false,
 		},
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: "e1db439e-43e1-4119-880e-37e47522e90d",
-			OnSecondInstanceLaunch: func(secondInstanceData options.SecondInstanceData) {
-				application.Show()
+			OnSecondInstanceLaunch: func(_ options.SecondInstanceData) {
+				application.ShowCapture()
 			},
 		},
 	})
 
 	if err != nil {
-		println("Error:", err.Error())
+		log.Fatal(err)
+	}
+}
+
+func buildMenu(application *app.App) *menu.Menu {
+	m := menu.NewMenu()
+
+	file := m.AddSubmenu("File")
+	file.AddText("Capture Thought", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
+		application.ShowCapture()
+	})
+	file.AddText("Review Garden", keys.Combo("r", keys.CmdOrCtrlKey, keys.OptionOrAltKey), func(_ *menu.CallbackData) {
+		application.ShowReview()
+	})
+	file.AddSeparator()
+	file.AddText("Quit", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
+		application.Quit()
+	})
+
+	edit := m.AddSubmenu("Edit")
+	edit.AddText("Cut", keys.CmdOrCtrl("x"), func(_ *menu.CallbackData) {
+		runtime.WindowExecJS(application.Context(), "document.execCommand('cut')")
+	})
+	edit.AddText("Copy", keys.CmdOrCtrl("c"), func(_ *menu.CallbackData) {
+		runtime.WindowExecJS(application.Context(), "document.execCommand('copy')")
+	})
+	edit.AddText("Paste", keys.CmdOrCtrl("v"), func(_ *menu.CallbackData) {
+		runtime.WindowExecJS(application.Context(), "document.execCommand('paste')")
+	})
+	edit.AddText("Select All", keys.CmdOrCtrl("a"), func(_ *menu.CallbackData) {
+		runtime.WindowExecJS(application.Context(), "document.execCommand('selectAll')")
+	})
+
+	return m
+}
+
+func registerHotkey(mods []hotkey.Modifier, key hotkey.Key, fn func()) {
+	hk := hotkey.New(mods, key)
+	if err := hk.Register(); err != nil {
+		log.Printf("hotkey register failed: %v", err)
+		return
+	}
+	for range hk.Keydown() {
+		fn()
 	}
 }
