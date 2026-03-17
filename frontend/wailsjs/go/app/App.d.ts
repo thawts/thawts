@@ -7,6 +7,10 @@ export function Context():Promise<context.Context>;
 
 export function DeleteThought(arg1:number):Promise<void>;
 
+export function FindRelated(arg1:string):Promise<domain.Thought>;
+
+export function GetHiddenThoughts():Promise<Array<domain.Thought>>;
+
 export function GetRecentThoughts(arg1:number):Promise<Array<domain.Thought>>;
 
 export function GetThought(arg1:number):Promise<domain.Thought>;
@@ -19,6 +23,8 @@ export function SaveThought(arg1:string):Promise<domain.Thought>;
 
 export function SearchThoughts(arg1:string):Promise<Array<domain.Thought>>;
 
+export function SemanticSearch(arg1:string):Promise<Array<domain.Thought>>;
+
 export function SetCaptureHeight(arg1:number):Promise<void>;
 
 export function SetTestMode(arg1:boolean):Promise<void>;
@@ -30,5 +36,7 @@ export function ShowReview():Promise<void>;
 export function Startup(arg1:context.Context):Promise<void>;
 
 export function ToggleCapture():Promise<void>;
+
+export function UnhideThought(arg1:number):Promise<void>;
 
 export function UpdateThought(arg1:number,arg2:string):Promise<domain.Thought>;

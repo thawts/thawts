@@ -19,6 +19,7 @@
   --accent:      #5588ff;
   --danger:      #ff5555;
   --font-sans:   -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  --font-serif:  Georgia, Charter, Palatino, 'Palatino Linotype', serif;
   --font-mono:   'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
 }
 
@@ -47,12 +48,12 @@ html, body {
 #shell {
   display: flex;
   flex-direction: column;
+  position: relative;
   width: 100%;
   height: 100%;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
 }
 
 #shell[data-mode="review"] {
@@ -106,6 +107,57 @@ html, body {
 
 #thought-input::placeholder {
   color: var(--text-dim);
+}
+
+/* ─── Slash command suggestions ──────────────────────────────────────────── */
+
+#slash-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 60px;
+  z-index: 200;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+}
+
+#shell[data-mode="review"] #slash-suggestions {
+  border-radius: 0;
+}
+
+.slash-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 20px;
+  cursor: pointer;
+  border-top: 1px solid var(--border);
+  border-left: 2px solid transparent;
+}
+
+.slash-item.active {
+  background: var(--bg-3);
+  border-left-color: var(--accent);
+}
+
+.slash-item:hover {
+  background: var(--bg-3);
+}
+
+.slash-cmd {
+  color: var(--accent);
+  font-size: 15px;
+  font-family: var(--font-mono);
+  min-width: 90px;
+}
+
+.slash-desc {
+  color: var(--text-dim);
+  font-size: 13px;
 }
 
 /* ─── Garden area ─────────────────────────────────────────────────────────── */
@@ -180,8 +232,9 @@ html, body {
 
 .stream-content {
   color: var(--text);
+  font-family: var(--font-serif);
   font-size: 16px;
-  line-height: 1.5;
+  line-height: 1.65;
   word-break: break-word;
 }
 
@@ -257,9 +310,9 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text);
-  font-family: var(--font-sans);
-  font-size: 15px;
-  line-height: 1.5;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.65;
   padding: 8px 10px;
   resize: vertical;
   outline: none;
@@ -284,6 +337,7 @@ html, body {
 .context-info { display: flex; flex-direction: column; gap: 2px; }
 .ctx-app { font-size: 13px; color: var(--text-muted); font-weight: 500; }
 .ctx-window { font-size: 12px; color: var(--text-dim); }
+.ctx-empty { font-size: 13px; color: var(--text-dim); }
 
 .inspector-actions {
   display: flex;
@@ -333,4 +387,164 @@ html, body {
   font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: lowercase;
+}
+
+/* ─── Mishap "Review Needed" bin ──────────────────────────────────────────── */
+
+.mishap-btn {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px !important;
+  color: var(--danger) !important;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mishap-badge {
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+
+.mishap-card {
+  background: var(--bg);
+  border: 1px solid #3a1a1a;
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+
+.mishap-content {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-all;
+  white-space: pre-wrap;
+  max-height: 80px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+}
+
+.mishap-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.mishap-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-keep {
+  background: transparent;
+  border: 1px solid var(--border-2);
+  color: var(--text-muted);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.btn-keep:hover { color: var(--text); border-color: var(--text-muted); }
+
+.btn-delete-mishap {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.btn-delete-mishap:hover { background: rgba(255, 85, 85, 0.1); }
+
+/* ─── Shadow record diff ─────────────────────────────────────────────────── */
+
+.btn-shadow-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font-family: var(--font-sans);
+}
+
+.btn-shadow-toggle:hover { color: var(--text-muted); }
+
+.shadow-diff {
+  margin-top: 8px;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  background: var(--bg-3);
+  border-radius: 4px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border-2);
+  word-break: break-word;
+}
+
+.diff-remove {
+  color: #ff6464;
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.diff-add {
+  color: #64c8ff;
+  background: rgba(100, 200, 255, 0.08);
+  border-radius: 2px;
+}
+
+/* ─── Proactive synthesis hint (DELTA-3c) ────────────────────────────────── */
+
+#related-hint {
+  display: none;
+  height: 28px;
+  padding: 0 20px;
+  align-items: center;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+#related-hint[style*="display: ;"],
+#related-hint:not([style*="display: none"]) {
+  display: flex !important;
+}
+
+.related-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.related-text {
+  font-size: 13px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

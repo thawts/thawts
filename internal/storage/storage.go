@@ -31,6 +31,28 @@ type Storage interface {
 	// AddTag attaches a classification tag to a thought.
 	AddTag(thoughtID int64, name, source string, confidence float64) error
 
+	// HideThought marks a thought as hidden (moves it to the "Review Needed" bin).
+	HideThought(id int64) error
+
+	// UnhideThought makes a thought visible again and removes any "mishap" tag.
+	UnhideThought(id int64) error
+
+	// GetHiddenThoughts returns all thoughts in the "Review Needed" bin.
+	GetHiddenThoughts() ([]*domain.Thought, error)
+
+	// SemanticSearch returns thoughts matching query. When vector embeddings are
+	// stored, results are ranked by cosine similarity; otherwise falls back to
+	// case-insensitive text search.
+	SemanticSearch(query string, limit int) ([]*domain.Thought, error)
+
+	// StoreEmbedding persists a dense float32 vector for the given thought.
+	// Overwrites any previously stored embedding for that thought.
+	StoreEmbedding(thoughtID int64, embedding []float32) error
+
+	// GetEmbeddings returns stored float32 vectors for the given thought IDs.
+	// Thoughts without a stored embedding are absent from the returned map.
+	GetEmbeddings(ids []int64) (map[int64][]float32, error)
+
 	// Close releases underlying resources.
 	Close() error
 }

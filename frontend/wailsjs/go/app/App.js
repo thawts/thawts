@@ -10,6 +10,14 @@ export function DeleteThought(arg1) {
   return window['go']['app']['App']['DeleteThought'](arg1);
 }
 
+export function FindRelated(arg1) {
+  return window['go']['app']['App']['FindRelated'](arg1);
+}
+
+export function GetHiddenThoughts() {
+  return window['go']['app']['App']['GetHiddenThoughts']();
+}
+
 export function GetRecentThoughts(arg1) {
   return window['go']['app']['App']['GetRecentThoughts'](arg1);
 }
@@ -34,6 +42,10 @@ export function SearchThoughts(arg1) {
   return window['go']['app']['App']['SearchThoughts'](arg1);
 }
 
+export function SemanticSearch(arg1) {
+  return window['go']['app']['App']['SemanticSearch'](arg1);
+}
+
 export function SetCaptureHeight(arg1) {
   return window['go']['app']['App']['SetCaptureHeight'](arg1);
 }
@@ -56,6 +68,10 @@ export function Startup(arg1) {
 
 export function ToggleCapture() {
   return window['go']['app']['App']['ToggleCapture']();
+}
+
+export function UnhideThought(arg1) {
+  return window['go']['app']['App']['UnhideThought'](arg1);
 }
 
 export function UpdateThought(arg1, arg2) {

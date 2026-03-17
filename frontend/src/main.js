@@ -5,20 +5,33 @@ import {
   UpdateThought,
   DeleteThought,
   GetThought,
+  GetHiddenThoughts,
+  UnhideThought,
   ShowCapture,
   ShowReview,
   HideWindow,
   SetCaptureHeight,
+  FindRelated,
 } from '../wailsjs/go/app/App.js';
 import { EventsOn } from '../wailsjs/runtime/runtime.js';
+
+// ─── Slash commands ───────────────────────────────────────────────────────────
+
+const SLASH_COMMANDS = [
+  { cmd: '/review', description: 'Open the garden' },
+];
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
 let mode = 'braindump'; // 'braindump' | 'review'
 let reviewThoughts = [];
+let hiddenThoughts = [];
 let selectedThoughtId = null;
-let reviewFilter = 'all';
+let reviewFilter = 'all'; // 'all' | tag name | 'mishap'
 let searchTimer = null;
+let relatedTimer = null;  // debounce for proactive synthesis (DELTA-3c)
+let slashIndex = -1;     // highlighted suggestion index, -1 = none
+let slashVisible = [];   // currently visible filtered commands
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -32,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
 EventsOn('mode:capture', () => enterBraindump());
 EventsOn('mode:review',  () => enterReview());
 EventsOn('thought:classified', () => { if (mode === 'review') refreshGarden(); });
+EventsOn('mishaps:changed', () => { if (mode === 'review') refreshMishapBadge(); });
 
 function buildApp() {
   document.getElementById('app').innerHTML = `
@@ -46,6 +60,8 @@ function buildApp() {
           spellcheck="false"
         />
       </div>
+      <div id="slash-suggestions" style="display:none"></div>
+      <div id="related-hint" style="display:none"></div>
       <div id="garden-area" style="display:none"></div>
     </div>
   `;
@@ -63,6 +79,8 @@ function buildApp() {
 
 function enterBraindump() {
   mode = 'braindump';
+  dismissSlash();
+  dismissRelatedHint();
   document.getElementById('shell').dataset.mode = 'braindump';
   document.getElementById('garden-area').style.display = 'none';
   document.getElementById('garden-area').innerHTML = '';
@@ -88,6 +106,47 @@ async function onInputKeydown(e) {
   const input = e.target;
   const text = input.value.trim();
 
+  // Arrow navigation and Enter/Escape/Tab when suggestions are open
+  if (slashVisible.length > 0) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      slashIndex = (slashIndex + 1) % slashVisible.length;
+      renderSlashSuggestions();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      slashIndex = slashIndex <= 0 ? slashVisible.length - 1 : slashIndex - 1;
+      renderSlashSuggestions();
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      const target = slashIndex >= 0 ? slashVisible[slashIndex] : slashVisible[0];
+      if (target) applySlashCommand(target.cmd);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      dismissSlash();
+      return;
+    }
+  }
+
+  // Arrow navigation through the thought stream in review mode (only when input is empty)
+  if (mode === 'review' && !text && slashVisible.length === 0 && reviewFilter !== 'mishap') {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      navigateThoughts(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      navigateThoughts(-1);
+      return;
+    }
+  }
+
   if (e.key === 'Escape') {
     e.preventDefault();
     if (mode === 'review' && !text) {
@@ -112,6 +171,7 @@ async function onInputKeydown(e) {
       if (!text || text.startsWith('/')) return;
       input.value = '';
       input.disabled = true;
+      dismissRelatedHint();
       try {
         await SaveThought(text);
         if (mode === 'review') await refreshGarden();
@@ -127,9 +187,61 @@ async function onInputKeydown(e) {
 }
 
 function onInputChange() {
-  if (mode === 'review') {
+  const val = document.getElementById('thought-input')?.value ?? '';
+
+  if (val.startsWith('/')) {
+    updateSlashSuggestions(val);
+  } else {
+    dismissSlash();
+  }
+
+  if (mode === 'review' && !val.startsWith('/')) {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(refreshGarden, 250);
+  }
+
+  // DELTA-3c: Proactive synthesis — show a related memory hint after 1.5s of pause.
+  if (mode === 'braindump' && val.trim().length >= 3 && !val.startsWith('/')) {
+    clearTimeout(relatedTimer);
+    relatedTimer = setTimeout(() => checkRelated(val.trim()), 1500);
+  } else {
+    clearTimeout(relatedTimer);
+    dismissRelatedHint();
+  }
+}
+
+async function checkRelated(text) {
+  try {
+    const thought = await FindRelated(text);
+    if (thought && thought.id) {
+      showRelatedHint(thought);
+    } else {
+      dismissRelatedHint();
+    }
+  } catch (_) {
+    dismissRelatedHint();
+  }
+}
+
+function showRelatedHint(thought) {
+  const el = document.getElementById('related-hint');
+  if (!el) return;
+  const preview = thought.content.length > 60
+    ? thought.content.slice(0, 60) + '…'
+    : thought.content;
+  el.innerHTML = `<span class="related-label">Related:</span> <span class="related-text">${escapeHtml(preview)}</span>`;
+  el.style.display = '';
+  // Expand capture window to show the hint row (+28px)
+  SetCaptureHeight(88);
+}
+
+function dismissRelatedHint() {
+  clearTimeout(relatedTimer);
+  const el = document.getElementById('related-hint');
+  if (el) el.style.display = 'none';
+  // Restore normal capture height only if slash suggestions are also gone
+  if (mode === 'braindump' && slashVisible.length === 0) {
+    SetCaptureHeight(60);
   }
 }
 
@@ -148,6 +260,9 @@ function mountGarden(container) {
           <button class="nav-btn" data-filter="idea">Ideas</button>
           <button class="nav-btn" data-filter="calendar">Calendar</button>
           <button class="nav-btn" data-filter="reminder">Reminders</button>
+          <button class="nav-btn mishap-btn" data-filter="mishap" style="display:none">
+            Review Needed <span id="mishap-count" class="mishap-badge"></span>
+          </button>
         </nav>
       </aside>
       <main id="stream"></main>
@@ -160,29 +275,70 @@ function mountGarden(container) {
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       reviewFilter = btn.dataset.filter;
+      selectedThoughtId = null;
+      document.getElementById('inspector').innerHTML = '';
       refreshGarden();
     });
   });
 }
 
 async function refreshGarden() {
-  const query = document.getElementById('thought-input')?.value.trim() || '';
-  try {
-    const all = await SearchThoughts(query);
-    reviewThoughts = (all || []).filter(t => {
-      if (reviewFilter === 'all') return true;
-      return (t.tags || []).some(tag => tag.name === reviewFilter);
-    });
-  } catch (e) {
-    console.error('refreshGarden failed:', e);
-    reviewThoughts = [];
+  // Refresh mishap badge alongside the main stream
+  refreshMishapBadge();
+
+  if (reviewFilter === 'mishap') {
+    try {
+      hiddenThoughts = await GetHiddenThoughts() || [];
+      reviewThoughts = hiddenThoughts;
+    } catch (e) {
+      console.error('GetHiddenThoughts failed:', e);
+      hiddenThoughts = [];
+      reviewThoughts = [];
+    }
+  } else {
+    const query = document.getElementById('thought-input')?.value.trim() || '';
+    try {
+      const all = await SearchThoughts(query);
+      reviewThoughts = (all || []).filter(t => {
+        if (reviewFilter === 'all') return true;
+        return (t.tags || []).some(tag => tag.name === reviewFilter);
+      });
+    } catch (e) {
+      console.error('refreshGarden failed:', e);
+      reviewThoughts = [];
+    }
   }
   renderStream();
+}
+
+async function refreshMishapBadge() {
+  try {
+    hiddenThoughts = await GetHiddenThoughts() || [];
+  } catch (_) {
+    return;
+  }
+  const btn = document.querySelector('.mishap-btn');
+  const badge = document.getElementById('mishap-count');
+  if (!btn || !badge) return;
+  const count = hiddenThoughts.length;
+  if (count > 0) {
+    btn.style.display = '';
+    badge.textContent = String(count);
+  } else {
+    // Hide button only if it's not currently selected
+    if (reviewFilter !== 'mishap') btn.style.display = 'none';
+    badge.textContent = '';
+  }
 }
 
 function renderStream() {
   const stream = document.getElementById('stream');
   if (!stream) return;
+
+  if (reviewFilter === 'mishap') {
+    renderMishapStream(stream);
+    return;
+  }
 
   if (reviewThoughts.length === 0) {
     stream.innerHTML = `<div class="empty-state">No thoughts yet.<br>Start capturing with <kbd>Ctrl+Shift+Space</kbd>.</div>`;
@@ -209,9 +365,66 @@ function renderStream() {
   });
 }
 
+function renderMishapStream(stream) {
+  if (hiddenThoughts.length === 0) {
+    stream.innerHTML = `<div class="empty-state">Nothing here.<br>All accidental captures have been reviewed.</div>`;
+    return;
+  }
+
+  stream.innerHTML = hiddenThoughts.map(t => `
+    <div class="mishap-card" data-id="${t.id}">
+      <div class="mishap-content">${escapeHtml(t.content)}</div>
+      <div class="mishap-footer">
+        <span class="stream-time">${formatRelativeTime(t.created_at)}</span>
+        <div class="mishap-actions">
+          <button class="btn-keep" data-id="${t.id}">Keep</button>
+          <button class="btn-delete-mishap" data-id="${t.id}">Delete</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  stream.querySelectorAll('.btn-keep').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = Number(btn.dataset.id);
+      try {
+        await UnhideThought(id);
+        hiddenThoughts = hiddenThoughts.filter(t => t.id !== id);
+        reviewThoughts = hiddenThoughts;
+        refreshMishapBadge();
+        renderStream();
+      } catch (e) { console.error(e); }
+    });
+  });
+
+  stream.querySelectorAll('.btn-delete-mishap').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = Number(btn.dataset.id);
+      if (!confirm('Permanently delete this thought?')) return;
+      try {
+        await DeleteThought(id);
+        hiddenThoughts = hiddenThoughts.filter(t => t.id !== id);
+        reviewThoughts = hiddenThoughts;
+        refreshMishapBadge();
+        renderStream();
+      } catch (e) { console.error(e); }
+    });
+  });
+}
+
+function navigateThoughts(delta) {
+  if (reviewThoughts.length === 0) return;
+  const cur = reviewThoughts.findIndex(t => t.id === selectedThoughtId);
+  const next = cur === -1
+    ? (delta > 0 ? 0 : reviewThoughts.length - 1)
+    : Math.max(0, Math.min(reviewThoughts.length - 1, cur + delta));
+  selectThought(reviewThoughts[next].id);
+}
+
 async function selectThought(id) {
   selectedThoughtId = id;
   renderStream();
+  document.querySelector('.stream-item.selected')?.scrollIntoView({ block: 'nearest' });
   try {
     const t = await GetThought(id);
     renderInspector(t);
@@ -225,22 +438,28 @@ function renderInspector(t) {
   if (!inspector) return;
   if (!t) { inspector.innerHTML = ''; return; }
 
-  const shadowSection = t.content !== t.raw_content ? `
-    <div class="inspector-section shadow-section">
-      <label class="inspector-label">Original (shadow record)</label>
-      <div class="shadow-text">${escapeHtml(t.raw_content)}</div>
+  const hasEdits = t.content !== t.raw_content;
+
+  const shadowToggle = hasEdits ? `
+    <div class="inspector-section">
+      <button id="btn-shadow-toggle" class="btn-shadow-toggle">View original</button>
+      <div id="shadow-diff" style="display:none" class="shadow-diff"></div>
     </div>
   ` : '';
 
-  const contextSection = t.context && (t.context.app_name || t.context.window_title) ? `
+  const hasContext = t.context && (t.context.app_name || t.context.window_title || t.context.url);
+  const contextSection = `
     <div class="inspector-section">
-      <label class="inspector-label">Context</label>
+      <label class="inspector-label">Captured from</label>
       <div class="context-info">
-        ${t.context.app_name ? `<span class="ctx-app">${escapeHtml(t.context.app_name)}</span>` : ''}
-        ${t.context.window_title ? `<span class="ctx-window">${escapeHtml(t.context.window_title)}</span>` : ''}
+        ${hasContext ? `
+          ${t.context.app_name ? `<span class="ctx-app">${escapeHtml(t.context.app_name)}</span>` : ''}
+          ${t.context.window_title ? `<span class="ctx-window">${escapeHtml(t.context.window_title)}</span>` : ''}
+          ${t.context.url ? `<span class="ctx-window">${escapeHtml(t.context.url)}</span>` : ''}
+        ` : '<span class="ctx-empty">—</span>'}
       </div>
     </div>
-  ` : '';
+  `;
 
   inspector.innerHTML = `
     <div id="inspector-inner">
@@ -248,7 +467,7 @@ function renderInspector(t) {
         <label class="inspector-label">Content</label>
         <textarea id="inspector-content" rows="6">${escapeHtml(t.content)}</textarea>
       </div>
-      ${shadowSection}
+      ${shadowToggle}
       <div class="inspector-section">
         <label class="inspector-label">Tags</label>
         <div>${renderTags(t.tags || [])}</div>
@@ -263,6 +482,23 @@ function renderInspector(t) {
       </div>
     </div>
   `;
+
+  if (hasEdits) {
+    let diffVisible = false;
+    const toggleBtn = document.getElementById('btn-shadow-toggle');
+    const diffEl = document.getElementById('shadow-diff');
+    toggleBtn.addEventListener('click', () => {
+      diffVisible = !diffVisible;
+      if (diffVisible) {
+        diffEl.innerHTML = renderWordDiff(t.raw_content, t.content);
+        diffEl.style.display = '';
+        toggleBtn.textContent = 'Hide original';
+      } else {
+        diffEl.style.display = 'none';
+        toggleBtn.textContent = 'View original';
+      }
+    });
+  }
 
   document.getElementById('btn-save-edit').addEventListener('click', async () => {
     const newContent = document.getElementById('inspector-content').value.trim();
@@ -286,6 +522,95 @@ function renderInspector(t) {
       renderStream();
     } catch (e) { console.error(e); }
   });
+}
+
+// ─── Word-level diff ──────────────────────────────────────────────────────────
+
+function renderWordDiff(original, modified) {
+  const a = original.split(/(\s+)/);
+  const b = modified.split(/(\s+)/);
+  const m = a.length, n = b.length;
+
+  // LCS table
+  const dp = Array.from({length: m + 1}, () => new Int32Array(n + 1));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
+
+  // Backtrack
+  const ops = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i-1] === b[j-1]) { ops.unshift({t: '=', v: a[i-1]}); i--; j--; }
+    else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) { ops.unshift({t: '+', v: b[j-1]}); j--; }
+    else { ops.unshift({t: '-', v: a[i-1]}); i--; }
+  }
+
+  return ops.map(op => {
+    const s = escapeHtml(op.v);
+    if (op.t === '-') return `<span class="diff-remove">${s}</span>`;
+    if (op.t === '+') return `<span class="diff-add">${s}</span>`;
+    return s;
+  }).join('');
+}
+
+// ─── Slash completion ─────────────────────────────────────────────────────────
+
+function updateSlashSuggestions(value) {
+  const query = value.toLowerCase();
+  const prev = slashVisible;
+  slashVisible = SLASH_COMMANDS.filter(c => c.cmd.startsWith(query));
+  if (slashVisible.length === 0) {
+    dismissSlash();
+    return;
+  }
+  // Keep current index in range; reset to -1 (no selection) when the list first appears or shrinks past it
+  if (prev.length === 0 || slashIndex >= slashVisible.length) slashIndex = -1;
+  renderSlashSuggestions();
+  if (mode === 'braindump') {
+    SetCaptureHeight(60 + slashVisible.length * 48);
+  }
+}
+
+function renderSlashSuggestions() {
+  const el = document.getElementById('slash-suggestions');
+  if (!el) return;
+  el.style.display = '';
+  el.innerHTML = slashVisible.map((c, i) => `
+    <div class="slash-item${i === slashIndex ? ' active' : ''}" data-index="${i}">
+      <span class="slash-cmd">${escapeHtml(c.cmd)}</span>
+      <span class="slash-desc">${escapeHtml(c.description)}</span>
+    </div>
+  `).join('');
+  el.querySelectorAll('.slash-item').forEach(row => {
+    row.addEventListener('mousedown', e => {
+      e.preventDefault(); // prevent blur before click registers
+      applySlashCommand(slashVisible[Number(row.dataset.index)].cmd);
+    });
+    row.addEventListener('mouseenter', () => {
+      slashIndex = Number(row.dataset.index);
+      renderSlashSuggestions();
+    });
+  });
+}
+
+function dismissSlash() {
+  slashVisible = [];
+  slashIndex = -1;
+  const el = document.getElementById('slash-suggestions');
+  if (el) el.style.display = 'none';
+  if (mode === 'braindump') SetCaptureHeight(60);
+}
+
+function applySlashCommand(cmd) {
+  const input = document.getElementById('thought-input');
+  if (input) { input.value = cmd; input.focus(); }
+  dismissSlash();
+  // Execute immediately
+  if (cmd === '/review') {
+    if (input) input.value = '';
+    ShowReview();
+  }
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────

@@ -9,6 +9,8 @@
 // All swaps require only changing the Provider passed to app.NewApp.
 package ai
 
+import "context"
+
 // Classification is the result of analysing a thought's content.
 type Classification struct {
 	Tags []ClassifiedTag
@@ -34,4 +36,23 @@ type Provider interface {
 
 	// DetectIntents scans text for actionable items (calendar events, tasks, reminders).
 	DetectIntents(text string) ([]Intent, error)
+
+	// IsMishap reports whether text looks like an accidental capture (password,
+	// code snippet, gibberish, or large paste). captureMs is the elapsed time
+	// between focus and Enter in milliseconds; 0 means unknown.
+	IsMishap(text string, captureMs int64) bool
+
+	// Embed produces a dense vector representation of text (384-dim float32).
+	// Returns nil when the provider does not support embeddings (e.g. stub).
+	// Callers must treat a nil return as "no embedding available".
+	Embed(ctx context.Context, text string) ([]float32, error)
+
+	// AnalyzeSentiment returns a polarity score in [-1.0, +1.0].
+	// Positive values indicate positive sentiment; negative indicates negative.
+	AnalyzeSentiment(ctx context.Context, text string) (float32, error)
+
+	// CleanText returns a typo-corrected, punctuated version of text for
+	// reading clarity. The original is never modified; this is display-only.
+	// Returns the original text unchanged when no LLM is available.
+	CleanText(ctx context.Context, text string) (string, error)
 }

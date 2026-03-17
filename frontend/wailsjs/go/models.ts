@@ -63,6 +63,7 @@ export namespace domain {
 	    raw_content: string;
 	    context: CaptureContext;
 	    tags: Tag[];
+	    hidden: boolean;
 	    // Go type: time
 	    created_at: any;
 	    // Go type: time
@@ -79,6 +80,7 @@ export namespace domain {
 	        this.raw_content = source["raw_content"];
 	        this.context = this.convertValues(source["context"], CaptureContext);
 	        this.tags = this.convertValues(source["tags"], Tag);
+	        this.hidden = source["hidden"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
 	    }

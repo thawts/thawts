@@ -24,12 +24,14 @@ type Tag struct {
 //
 // RawContent is the original text captured from the user — it is immutable (the
 // "shadow record"). Content may be edited later in Review Mode; RawContent never is.
+// Hidden thoughts are filtered from normal views and land in the "Review Needed" bin.
 type Thought struct {
 	ID         int64          `json:"id"`
 	Content    string         `json:"content"`
 	RawContent string         `json:"raw_content"`
 	Context    CaptureContext `json:"context"`
 	Tags       []Tag          `json:"tags"`
+	Hidden     bool           `json:"hidden"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`
 }

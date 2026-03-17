@@ -43,8 +43,8 @@ func main() {
 
 	application := app.NewApp(
 		store,
-		ai.NewStubProvider(),
-		metadata.NewStubProvider(),
+		ai.NewLLMProvider(filepath.Join(homeDir, ".thawts", "models", "classifier.gguf")),
+		metadata.New(),
 	)
 
 	appMenu := buildMenu(application)
@@ -54,8 +54,9 @@ func main() {
 		Width:       800,
 		Height:      60,
 		Frameless:   true,
-		AlwaysOnTop: true,
-		Menu:        appMenu,
+		AlwaysOnTop:      true,
+		HideWindowOnClose: true,
+		Menu:             appMenu,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

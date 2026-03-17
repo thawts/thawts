@@ -140,6 +140,136 @@ func TestAddTagAndRetrieve(t *testing.T) {
 	}
 }
 
+func TestHideAndUnhideThought(t *testing.T) {
+	store := newTestDB(t)
+
+	saved, _ := store.SaveThought("my password 12345", emptyCtx)
+	store.AddTag(saved.ID, "mishap", "ai", 0.9)
+
+	if err := store.HideThought(saved.ID); err != nil {
+		t.Fatalf("HideThought: %v", err)
+	}
+
+	// Should not appear in normal queries
+	recent, _ := store.GetRecentThoughts(10)
+	for _, th := range recent {
+		if th.ID == saved.ID {
+			t.Error("hidden thought appeared in GetRecentThoughts")
+		}
+	}
+
+	hidden, err := store.GetHiddenThoughts()
+	if err != nil {
+		t.Fatalf("GetHiddenThoughts: %v", err)
+	}
+	if len(hidden) != 1 || hidden[0].ID != saved.ID {
+		t.Errorf("GetHiddenThoughts returned %d results, want 1", len(hidden))
+	}
+	if !hidden[0].Hidden {
+		t.Error("thought.Hidden should be true")
+	}
+
+	// Unhide — should remove mishap tag and restore visibility
+	if err := store.UnhideThought(saved.ID); err != nil {
+		t.Fatalf("UnhideThought: %v", err)
+	}
+
+	restored, _ := store.GetThought(saved.ID)
+	if restored.Hidden {
+		t.Error("thought.Hidden should be false after UnhideThought")
+	}
+	for _, tag := range restored.Tags {
+		if tag.Name == "mishap" {
+			t.Error("mishap tag should have been removed by UnhideThought")
+		}
+	}
+
+	hidden2, _ := store.GetHiddenThoughts()
+	if len(hidden2) != 0 {
+		t.Error("GetHiddenThoughts should be empty after UnhideThought")
+	}
+}
+
+func TestSearchExcludesHidden(t *testing.T) {
+	store := newTestDB(t)
+
+	store.SaveThought("visible thought", emptyCtx)
+	hidden, _ := store.SaveThought("hidden thought", emptyCtx)
+	store.HideThought(hidden.ID)
+
+	results, _ := store.SearchThoughts("thought", 10)
+	for _, r := range results {
+		if r.ID == hidden.ID {
+			t.Error("SearchThoughts returned a hidden thought")
+		}
+	}
+}
+
+func TestStoreAndGetEmbeddings(t *testing.T) {
+	store := newTestDB(t)
+
+	t1, _ := store.SaveThought("machine learning is fascinating", emptyCtx)
+	t2, _ := store.SaveThought("deep neural networks", emptyCtx)
+
+	vec1 := []float32{0.1, 0.2, 0.3, 0.4}
+	vec2 := []float32{0.5, 0.6, 0.7, 0.8}
+
+	if err := store.StoreEmbedding(t1.ID, vec1); err != nil {
+		t.Fatalf("StoreEmbedding t1: %v", err)
+	}
+	if err := store.StoreEmbedding(t2.ID, vec2); err != nil {
+		t.Fatalf("StoreEmbedding t2: %v", err)
+	}
+
+	// Overwrite — should not error
+	if err := store.StoreEmbedding(t1.ID, vec1); err != nil {
+		t.Fatalf("StoreEmbedding overwrite: %v", err)
+	}
+
+	embs, err := store.GetEmbeddings([]int64{t1.ID, t2.ID})
+	if err != nil {
+		t.Fatalf("GetEmbeddings: %v", err)
+	}
+	if len(embs) != 2 {
+		t.Fatalf("expected 2 embeddings, got %d", len(embs))
+	}
+	for i, v := range vec1 {
+		if embs[t1.ID][i] != v {
+			t.Errorf("embedding[%d] = %v, want %v", i, embs[t1.ID][i], v)
+		}
+	}
+}
+
+func TestSemanticSearchFallsBackToText(t *testing.T) {
+	store := newTestDB(t)
+
+	store.SaveThought("meeting tomorrow at noon", emptyCtx)
+	store.SaveThought("buy groceries today", emptyCtx)
+
+	// No embeddings stored — should fall back to text LIKE search.
+	results, err := store.SemanticSearch("meeting", 10)
+	if err != nil {
+		t.Fatalf("SemanticSearch: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Content != "meeting tomorrow at noon" {
+		t.Errorf("unexpected result: %q", results[0].Content)
+	}
+}
+
+func TestGetEmbeddingsEmpty(t *testing.T) {
+	store := newTestDB(t)
+	embs, err := store.GetEmbeddings([]int64{})
+	if err != nil {
+		t.Fatalf("GetEmbeddings empty: %v", err)
+	}
+	if embs != nil {
+		t.Errorf("expected nil for empty input, got %v", embs)
+	}
+}
+
 func TestDeleteCascadesTags(t *testing.T) {
 	store := newTestDB(t)
 
