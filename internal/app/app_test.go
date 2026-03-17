@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	appai "thawts-client/internal/ai"
+	"thawts-client/internal/domain"
 	"thawts-client/internal/metadata"
 	"thawts-client/internal/storage"
 )
@@ -120,5 +121,109 @@ func TestDeleteThought(t *testing.T) {
 	_, err := a.GetThought(saved.ID)
 	if err == nil {
 		t.Error("expected error retrieving deleted thought")
+	}
+}
+
+// --- cosineSimilarity ---
+
+func TestCosineSimilarity(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b []float32
+		want float32
+	}{
+		{"identical", []float32{1, 0, 0}, []float32{1, 0, 0}, 1.0},
+		{"orthogonal", []float32{1, 0}, []float32{0, 1}, 0.0},
+		{"opposite", []float32{1, 0}, []float32{-1, 0}, -1.0},
+		{"zero length a", nil, []float32{1}, 0.0},
+		{"dim mismatch", []float32{1, 2}, []float32{1}, 0.0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cosineSimilarity(tc.a, tc.b)
+			if diff := got - tc.want; diff < -0.001 || diff > 0.001 {
+				t.Errorf("cosineSimilarity = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// --- classifyAsync ---
+
+func TestClassifyAsyncMishapHidesThought(t *testing.T) {
+	a := newTestApp(t)
+
+	saved, err := a.store.SaveThought("aX9#kP!2@mZ&qR5s", domain.CaptureContext{})
+	if err != nil {
+		t.Fatalf("SaveThought: %v", err)
+	}
+
+	a.classifyAsync(saved.ID, saved.Content)
+
+	hidden, err := a.store.GetHiddenThoughts()
+	if err != nil {
+		t.Fatalf("GetHiddenThoughts: %v", err)
+	}
+	found := false
+	for _, th := range hidden {
+		if th.ID == saved.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("mishap thought was not hidden by classifyAsync")
+	}
+
+	th, _ := a.store.GetThought(saved.ID)
+	hasMishapTag := false
+	for _, tag := range th.Tags {
+		if tag.Name == "mishap" {
+			hasMishapTag = true
+		}
+	}
+	if !hasMishapTag {
+		t.Error("mishap tag was not attached by classifyAsync")
+	}
+}
+
+func TestClassifyAsyncTagsNormalThought(t *testing.T) {
+	a := newTestApp(t)
+
+	saved, err := a.store.SaveThought("buy milk tomorrow", domain.CaptureContext{})
+	if err != nil {
+		t.Fatalf("SaveThought: %v", err)
+	}
+
+	a.classifyAsync(saved.ID, saved.Content)
+
+	th, err := a.store.GetThought(saved.ID)
+	if err != nil {
+		t.Fatalf("GetThought: %v", err)
+	}
+	if len(th.Tags) == 0 {
+		t.Error("expected tags to be attached for a classified thought")
+	}
+	if th.Hidden {
+		t.Error("normal thought should not be hidden")
+	}
+}
+
+// --- SemanticSearch fallback ---
+
+func TestSemanticSearchFallsBackToText(t *testing.T) {
+	a := newTestApp(t)
+
+	a.SaveThought("machine learning conference next week")
+	a.SaveThought("buy groceries today")
+
+	results, err := a.SemanticSearch("machine learning")
+	if err != nil {
+		t.Fatalf("SemanticSearch: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	if results[0].Content != "machine learning conference next week" {
+		t.Errorf("unexpected top result: %q", results[0].Content)
 	}
 }
