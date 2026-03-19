@@ -370,6 +370,7 @@ html, body {
 }
 
 .btn-danger:hover { background: rgba(255, 85, 85, 0.1); }
+.btn-danger.armed { background: var(--danger); color: #fff; }
 
 .inspector-times span {
   font-size: 12px;

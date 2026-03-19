@@ -563,9 +563,18 @@ function renderMishapStream(stream) {
   });
 
   stream.querySelectorAll('.btn-delete-mishap').forEach(btn => {
+    let armed = false;
     btn.addEventListener('click', async () => {
       const id = Number(btn.dataset.id);
-      if (!confirm('Permanently delete this thought?')) return;
+      if (!armed) {
+        armed = true;
+        btn.textContent = 'Confirm?';
+        setTimeout(() => {
+          armed = false;
+          if (btn.isConnected) btn.textContent = 'Delete';
+        }, 3000);
+        return;
+      }
       try {
         await DeleteThought(id);
         hiddenThoughts = hiddenThoughts.filter(t => t.id !== id);
@@ -804,8 +813,22 @@ function renderInspector(t) {
     } catch (e) { console.error(e); }
   });
 
-  document.getElementById('btn-delete').addEventListener('click', async () => {
-    if (!confirm('Delete this thought? This cannot be undone.')) return;
+  const deleteBtn = document.getElementById('btn-delete');
+  let deleteArmed = false;
+  deleteBtn.addEventListener('click', async () => {
+    if (!deleteArmed) {
+      deleteArmed = true;
+      deleteBtn.textContent = 'Confirm delete';
+      deleteBtn.classList.add('armed');
+      setTimeout(() => {
+        deleteArmed = false;
+        if (deleteBtn.isConnected) {
+          deleteBtn.textContent = 'Delete';
+          deleteBtn.classList.remove('armed');
+        }
+      }, 3000);
+      return;
+    }
     try {
       await DeleteThought(t.id);
       selectedThoughtId = null;
