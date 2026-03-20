@@ -109,57 +109,6 @@ html, body {
   color: var(--text-dim);
 }
 
-/* ─── Slash command suggestions ──────────────────────────────────────────── */
-
-#slash-suggestions {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 60px;
-  z-index: 200;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 8px 8px;
-  overflow: hidden;
-}
-
-#shell[data-mode="review"] #slash-suggestions {
-  border-radius: 0;
-}
-
-.slash-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 48px;
-  padding: 0 20px;
-  cursor: pointer;
-  border-top: 1px solid var(--border);
-  border-left: 2px solid transparent;
-}
-
-.slash-item.active {
-  background: var(--bg-3);
-  border-left-color: var(--accent);
-}
-
-.slash-item:hover {
-  background: var(--bg-3);
-}
-
-.slash-cmd {
-  color: var(--accent);
-  font-size: 15px;
-  font-family: var(--font-mono);
-  min-width: 90px;
-}
-
-.slash-desc {
-  color: var(--text-dim);
-  font-size: 13px;
-}
-
 /* ─── Garden area ─────────────────────────────────────────────────────────── */
 
 #garden-area {
@@ -229,6 +178,8 @@ html, body {
 
 .stream-item:hover { border-color: var(--border-2); background: var(--bg-3); }
 .stream-item.selected { border-color: var(--accent); background: var(--bg-3); }
+.stream-item.delete-armed { border-color: var(--danger); background: rgba(255, 85, 85, 0.06); }
+.stream-item.delete-armed .stream-time::after { content: ' · press d to confirm'; color: var(--danger); }
 
 .stream-content {
   color: var(--text);
@@ -312,11 +263,10 @@ html, body {
   color: var(--text);
   font-family: var(--font-serif);
   font-size: 16px;
-  line-height: 1.65;
   padding: 8px 10px;
-  resize: vertical;
   outline: none;
   width: 100%;
+  box-sizing: border-box;
 }
 
 #inspector-content:focus { border-color: var(--border-2); }

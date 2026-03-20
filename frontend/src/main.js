@@ -1,5 +1,6 @@
 import './style.css';
 import { setupEscHandler } from './esc-handler.js';
+import { setupTabHandler } from './tab-handler.js';
 import {
   SaveThought,
   SearchThoughts,
@@ -22,12 +23,6 @@ import {
 } from '../bindings/github.com/thawts/thawts/internal/app/app.js';
 import { Events } from '@wailsio/runtime';
 
-// ─── Slash commands ───────────────────────────────────────────────────────────
-
-const SLASH_COMMANDS = [
-  { cmd: '/review', description: 'Open the garden' },
-];
-
 // ─── State ────────────────────────────────────────────────────────────────────
 
 let mode = 'braindump'; // 'braindump' | 'review'
@@ -38,15 +33,54 @@ let selectedThoughtId = null;
 let reviewFilter = 'all'; // 'all' | tag name | 'mishap' | 'actions'
 let searchTimer = null;
 let relatedTimer = null;  // debounce for proactive synthesis (DELTA-3c)
-let slashIndex = -1;     // highlighted suggestion index, -1 = none
-let slashVisible = [];   // currently visible filtered commands
+let deleteArmedTimer = null; // armed state for keyboard delete (d d)
+let pendingEdit = false;    // set when 'e' is pressed before inspector finishes loading
 let mergeSelectionIds = new Set(); // IDs selected for merge (DELTA-7a)
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
   buildApp();
-  setupEscHandler(() => mode, HideWindow, ShowCapture);
+  setupEscHandler({
+    getMode:         () => mode,
+    getSelectedId:   () => selectedThoughtId,
+    deselectThought: () => {
+      clearDeleteArmed();
+      pendingEdit = false;
+      selectedThoughtId = null;
+      renderStream();
+      const inspector = document.getElementById('inspector');
+      if (inspector) inspector.innerHTML = '';
+    },
+    getInputValue:   () => document.getElementById('thought-input')?.value ?? '',
+    clearInput:      () => {
+      const el = document.getElementById('thought-input');
+      if (el) { el.value = ''; onInputChange(); }
+    },
+    focusInput:      () => document.getElementById('thought-input')?.focus(),
+    hideWindow:      HideWindow,
+    showCapture:     ShowCapture,
+  });
+  setupTabHandler(() => mode, ShowReview, ShowCapture);
+
+  // Navigation and selection shortcuts in review mode.
+  // Uses capture so they fire regardless of what element has focus.
+  document.addEventListener('keydown', (e) => {
+    if (mode !== 'review') return;
+    // Skip if focus is in the inspector editor — that input handles its own keys.
+    if (e.target?.id === 'inspector-content') return;
+
+    // Arrow navigation works regardless of search text.
+    if (reviewFilter !== 'mishap' && reviewFilter !== 'actions') {
+      if (e.key === 'ArrowDown') { e.preventDefault(); navigateThoughts(1); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); navigateThoughts(-1); return; }
+    }
+
+    if (selectedThoughtId === null) return;
+    if (e.key === 'd') { e.preventDefault(); handleDeleteKey(); }
+    else if (e.key === 'e') { e.preventDefault(); handleEditKey(); }
+  }, { capture: true });
+
   window.addEventListener('blur', () => {
     if (mode === 'braindump') setTimeout(() => HideWindow(), 200);
   });
@@ -73,7 +107,6 @@ function buildApp() {
           spellcheck="false"
         />
       </div>
-      <div id="slash-suggestions" style="display:none"></div>
       <div id="related-hint" style="display:none"></div>
       <div id="garden-area" style="display:none"></div>
     </div>
@@ -92,24 +125,25 @@ function buildApp() {
 
 function enterBraindump() {
   mode = 'braindump';
-  dismissSlash();
+  clearDeleteArmed();
   dismissRelatedHint();
   document.getElementById('shell').dataset.mode = 'braindump';
   document.getElementById('garden-area').style.display = 'none';
   document.getElementById('garden-area').innerHTML = '';
   const input = document.getElementById('thought-input');
-  if (input) { input.placeholder = 'What\'s on your mind…'; input.value = ''; setTimeout(() => input.focus(), 50); }
+  if (input) { input.placeholder = 'What\'s on your mind…'; setTimeout(() => input.focus(), 50); }
   SetCaptureHeight(60);
 }
 
 function enterReview() {
   mode = 'review';
+  dismissRelatedHint(); // cancel any pending braindump-mode related-hint timer
   document.getElementById('shell').dataset.mode = 'review';
   const gardenArea = document.getElementById('garden-area');
   gardenArea.style.display = 'flex';
   mountGarden(gardenArea);
   const input = document.getElementById('thought-input');
-  if (input) { input.placeholder = 'Search garden…'; input.value = ''; setTimeout(() => input.focus(), 50); }
+  if (input) { input.placeholder = 'Search garden…'; setTimeout(() => input.focus(), 50); }
   refreshGarden();
   checkAndShowWellbeingCard();
 }
@@ -120,69 +154,10 @@ async function onInputKeydown(e) {
   const input = e.target;
   const text = input.value.trim();
 
-  // Arrow navigation and Enter/Escape/Tab when suggestions are open
-  if (slashVisible.length > 0) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      slashIndex = (slashIndex + 1) % slashVisible.length;
-      renderSlashSuggestions();
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      slashIndex = slashIndex <= 0 ? slashVisible.length - 1 : slashIndex - 1;
-      renderSlashSuggestions();
-      return;
-    }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault();
-      const target = slashIndex >= 0 ? slashVisible[slashIndex] : slashVisible[0];
-      if (target) applySlashCommand(target.cmd);
-      return;
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      dismissSlash();
-      return;
-    }
-  }
-
-  // Arrow navigation through the thought stream in review mode (only when input is empty)
-  if (mode === 'review' && !text && slashVisible.length === 0 && reviewFilter !== 'mishap' && reviewFilter !== 'actions') {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      navigateThoughts(1);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      navigateThoughts(-1);
-      return;
-    }
-  }
-
-  if (e.key === 'Escape') {
-    e.preventDefault();
-    if (mode === 'review' && !text) {
-      ShowCapture();
-    } else {
-      HideWindow();
-    }
-    return;
-  }
-
   if (e.key === 'Enter') {
     e.preventDefault();
-
-    // Slash commands (both modes)
-    if (text === '/review') {
-      input.value = '';
-      ShowReview(); // Go resizes window and emits mode:review
-      return;
-    }
-
     if (mode === 'braindump' || mode === 'review') {
-      if (!text || text.startsWith('/')) return;
+      if (!text) return;
       input.value = '';
       input.disabled = true;
       dismissRelatedHint();
@@ -203,19 +178,13 @@ async function onInputKeydown(e) {
 function onInputChange() {
   const val = document.getElementById('thought-input')?.value ?? '';
 
-  if (val.startsWith('/')) {
-    updateSlashSuggestions(val);
-  } else {
-    dismissSlash();
-  }
-
-  if (mode === 'review' && !val.startsWith('/')) {
+  if (mode === 'review') {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(refreshGarden, 250);
   }
 
-  // DELTA-3c: Proactive synthesis — show a related memory hint after 1.5s of pause.
-  if (mode === 'braindump' && val.trim().length >= 3 && !val.startsWith('/')) {
+  // Proactive synthesis — show a related memory hint after 1.5s of pause.
+  if (mode === 'braindump' && val.trim().length >= 3) {
     clearTimeout(relatedTimer);
     relatedTimer = setTimeout(() => checkRelated(val.trim()), 1500);
   } else {
@@ -254,7 +223,7 @@ function dismissRelatedHint() {
   const el = document.getElementById('related-hint');
   if (el) el.style.display = 'none';
   // Restore normal capture height only if slash suggestions are also gone
-  if (mode === 'braindump' && slashVisible.length === 0) {
+  if (mode === 'braindump') {
     SetCaptureHeight(60);
   }
 }
@@ -670,6 +639,7 @@ function renderActionsStream(stream) {
 // ─── Thought navigation & selection ──────────────────────────────────────────
 
 function navigateThoughts(delta) {
+  clearDeleteArmed();
   if (reviewThoughts.length === 0) return;
   const cur = reviewThoughts.findIndex(t => t.id === selectedThoughtId);
   const next = cur === -1
@@ -679,13 +649,20 @@ function navigateThoughts(delta) {
 }
 
 async function selectThought(id) {
+  clearDeleteArmed();
   selectedThoughtId = id;
   renderStream();
   document.querySelector('.stream-item.selected')?.scrollIntoView({ block: 'nearest' });
+  document.getElementById('thought-input')?.blur();
   try {
     const t = await GetThought(id);
     renderInspector(t);
+    if (pendingEdit) {
+      pendingEdit = false;
+      focusInspectorContent();
+    }
   } catch (_) {
+    pendingEdit = false;
     renderInspector(null);
   }
 }
@@ -736,7 +713,7 @@ function renderInspector(t) {
           <label class="inspector-label">Content</label>
           <button id="btn-clean-toggle" class="btn-clean-toggle">Clean view</button>
         </div>
-        <textarea id="inspector-content" rows="6">${escapeHtml(t.content)}</textarea>
+        <input id="inspector-content" type="text" value="${escapeHtml(t.content)}" />
       </div>
       ${shadowToggle}
       <div class="inspector-section">
@@ -802,10 +779,13 @@ function renderInspector(t) {
     }
   });
 
-  document.getElementById('btn-save-edit').addEventListener('click', async () => {
-    if (cleanViewActive) return; // don't save cleaned text
+  async function saveInspectorEdit() {
+    if (cleanViewActive) return;
     const newContent = document.getElementById('inspector-content').value.trim();
-    if (!newContent || newContent === t.content) return;
+    if (!newContent || newContent === t.content) {
+      document.getElementById('inspector-content')?.blur();
+      return;
+    }
     try {
       const updated = await UpdateThought(t.id, newContent);
       const idx = reviewThoughts.findIndex(x => x.id === t.id);
@@ -813,6 +793,18 @@ function renderInspector(t) {
       renderStream();
       renderInspector(updated);
     } catch (e) { console.error(e); }
+  }
+
+  document.getElementById('btn-save-edit').addEventListener('click', saveInspectorEdit);
+
+  document.getElementById('inspector-content').addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); await saveInspectorEdit(); }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation(); // prevent esc-handler from switching modes
+      e.target.value = t.content; // discard changes
+      e.target.blur();
+    }
   });
 
   const deleteBtn = document.getElementById('btn-delete');
@@ -871,62 +863,54 @@ function renderWordDiff(original, modified) {
   }).join('');
 }
 
-// ─── Slash completion ─────────────────────────────────────────────────────────
+// ─── Keyboard shortcuts: delete and edit ─────────────────────────────────────
 
-function updateSlashSuggestions(value) {
-  const query = value.toLowerCase();
-  const prev = slashVisible;
-  slashVisible = SLASH_COMMANDS.filter(c => c.cmd.startsWith(query));
-  if (slashVisible.length === 0) {
-    dismissSlash();
-    return;
+function clearDeleteArmed() {
+  if (deleteArmedTimer) {
+    clearTimeout(deleteArmedTimer);
+    deleteArmedTimer = null;
   }
-  // Keep current index in range; reset to -1 (no selection) when the list first appears or shrinks past it
-  if (prev.length === 0 || slashIndex >= slashVisible.length) slashIndex = -1;
-  renderSlashSuggestions();
-  if (mode === 'braindump') {
-    SetCaptureHeight(60 + slashVisible.length * 48);
+  document.querySelector('.stream-item.delete-armed')?.classList.remove('delete-armed');
+}
+
+function handleDeleteKey() {
+  const item = document.querySelector('.stream-item.selected');
+  if (!item) return;
+  if (deleteArmedTimer) {
+    // Second d: confirm
+    clearDeleteArmed();
+    confirmDeleteThought(selectedThoughtId);
+  } else {
+    // First d: arm
+    item.classList.add('delete-armed');
+    deleteArmedTimer = setTimeout(() => clearDeleteArmed(), 3000);
   }
 }
 
-function renderSlashSuggestions() {
-  const el = document.getElementById('slash-suggestions');
+async function confirmDeleteThought(id) {
+  try {
+    await DeleteThought(id);
+    selectedThoughtId = null;
+    document.getElementById('inspector').innerHTML = '';
+    reviewThoughts = reviewThoughts.filter(t => t.id !== id);
+    renderStream();
+  } catch (e) { console.error('DeleteThought failed:', e); }
+}
+
+function focusInspectorContent() {
+  const el = document.getElementById('inspector-content');
   if (!el) return;
-  el.style.display = '';
-  el.innerHTML = slashVisible.map((c, i) => `
-    <div class="slash-item${i === slashIndex ? ' active' : ''}" data-index="${i}">
-      <span class="slash-cmd">${escapeHtml(c.cmd)}</span>
-      <span class="slash-desc">${escapeHtml(c.description)}</span>
-    </div>
-  `).join('');
-  el.querySelectorAll('.slash-item').forEach(row => {
-    row.addEventListener('mousedown', e => {
-      e.preventDefault(); // prevent blur before click registers
-      applySlashCommand(slashVisible[Number(row.dataset.index)].cmd);
-    });
-    row.addEventListener('mouseenter', () => {
-      slashIndex = Number(row.dataset.index);
-      renderSlashSuggestions();
-    });
-  });
+  el.focus();
+  el.selectionStart = el.selectionEnd = el.value.length;
 }
 
-function dismissSlash() {
-  slashVisible = [];
-  slashIndex = -1;
-  const el = document.getElementById('slash-suggestions');
-  if (el) el.style.display = 'none';
-  if (mode === 'braindump') SetCaptureHeight(60);
-}
-
-function applySlashCommand(cmd) {
-  const input = document.getElementById('thought-input');
-  if (input) { input.value = cmd; input.focus(); }
-  dismissSlash();
-  // Execute immediately
-  if (cmd === '/review') {
-    if (input) input.value = '';
-    ShowReview();
+function handleEditKey() {
+  const el = document.getElementById('inspector-content');
+  if (el) {
+    focusInspectorContent();
+  } else {
+    // Inspector is still loading (async GetThought); focus it once it's rendered.
+    pendingEdit = true;
   }
 }
 
