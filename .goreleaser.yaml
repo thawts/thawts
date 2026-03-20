@@ -13,19 +13,18 @@ builds:
     # Inject the version string at build time.
     ldflags:
       - -s -w -X main.version={{ .Version }}
+    # Wails requires CGO and native system libraries (WebKit/WebView2).
+    # Cross-compilation is not supported — each platform needs its own
+    # native runner. For now we build macOS only (arm64 + amd64 both work
+    # on an Apple Silicon runner). Linux and Windows will be added later
+    # via a matrix of native runners.
     goos:
       - darwin
-      - windows
-      - linux
     goarch:
       - amd64
       - arm64
-    ignore:
-      # Windows ARM64 is uncommon; skip for now.
-      - goos: windows
-        goarch: arm64
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
 
 # ── macOS notarization ────────────────────────────────────────────────────────
 # TODO (WP-4.3): add notarize section once APPLE_* secrets are configured.
@@ -33,7 +32,7 @@ builds:
 
 archives:
   - id: thawts
-    format: zip
+    formats: [zip]
     name_template: "thawts_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
@@ -59,7 +58,7 @@ release:
 # Pushes an updated Formula/thawts.rb to the tap repo after each release.
 # Requires HOMEBREW_TAP_TOKEN (PAT with repo write on homebrew-tap) and
 # HOMEBREW_TAP_OWNER to be set as GitHub Actions secrets.
-brews:
+homebrew_packages:
   - name: thawts
     repository:
       owner: "{{ .Env.HOMEBREW_TAP_OWNER }}"
