@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"thawts-client/internal/domain"
+	"github.com/thawts/thawts/internal/domain"
 )
 
 func newTestDB(t *testing.T) *SQLiteStorage {

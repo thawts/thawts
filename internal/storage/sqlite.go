@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"thawts-client/internal/domain"
+	"github.com/thawts/thawts/internal/domain"
 
 	_ "modernc.org/sqlite"
 )

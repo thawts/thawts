@@ -5,7 +5,7 @@
 // touching the rest of the application.
 package storage
 
-import "thawts-client/internal/domain"
+import "github.com/thawts/thawts/internal/domain"
 
 // Storage is the persistence contract.
 type Storage interface {

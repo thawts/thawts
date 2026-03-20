@@ -10,10 +10,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"thawts-client/internal/ai"
-	"thawts-client/internal/metadata"
-	"thawts-client/internal/service"
-	"thawts-client/internal/storage"
+	"github.com/thawts/thawts/internal/ai"
+	"github.com/thawts/thawts/internal/metadata"
+	"github.com/thawts/thawts/internal/service"
+	"github.com/thawts/thawts/internal/storage"
 )
 
 // Run initialises the service, wires a TUINotifier, and starts the Bubble Tea

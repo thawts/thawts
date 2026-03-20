@@ -10,8 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"thawts-client/internal/domain"
-	"thawts-client/internal/service"
+	"github.com/thawts/thawts/internal/domain"
+	"github.com/thawts/thawts/internal/service"
 )
 
 // ── View kinds ────────────────────────────────────────────────────────────────

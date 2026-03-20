@@ -5,10 +5,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@wailsio/runtime": "latest",
-    "vite": "^3.0.7"
+    "jsdom": "^29.0.1",
+    "vite": "^3.0.7",
+    "vitest": "^4.1.0"
   }
 }

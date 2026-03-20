@@ -1,4 +1,4 @@
-module thawts-client
+module github.com/thawts/thawts
 
 go 1.25
 

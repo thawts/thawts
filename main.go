@@ -14,13 +14,13 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"golang.design/x/hotkey"
 
-	thawtsapp "thawts-client/internal/app"
-	"thawts-client/internal/ai"
-	"thawts-client/internal/metadata"
-	"thawts-client/internal/service"
-	"thawts-client/internal/storage"
-	"thawts-client/internal/tray"
-	"thawts-client/internal/tui"
+	thawtsapp "github.com/thawts/thawts/internal/app"
+	"github.com/thawts/thawts/internal/ai"
+	"github.com/thawts/thawts/internal/metadata"
+	"github.com/thawts/thawts/internal/service"
+	"github.com/thawts/thawts/internal/storage"
+	"github.com/thawts/thawts/internal/tray"
+	"github.com/thawts/thawts/internal/tui"
 )
 
 //go:embed all:frontend/dist

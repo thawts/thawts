@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"thawts-client/internal/ai"
-	"thawts-client/internal/domain"
-	"thawts-client/internal/metadata"
-	"thawts-client/internal/storage"
+	"github.com/thawts/thawts/internal/ai"
+	"github.com/thawts/thawts/internal/domain"
+	"github.com/thawts/thawts/internal/metadata"
+	"github.com/thawts/thawts/internal/storage"
 )
 
 // cosineSimilarity returns the cosine similarity in [−1, +1] between two vectors.

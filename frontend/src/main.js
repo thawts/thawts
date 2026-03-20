@@ -1,4 +1,5 @@
 import './style.css';
+import { setupEscHandler } from './esc-handler.js';
 import {
   SaveThought,
   SearchThoughts,
@@ -18,7 +19,7 @@ import {
   GetSentimentTrend,
   MergeThoughts,
   CleanText,
-} from '../bindings/thawts-client/internal/app/app.js';
+} from '../bindings/github.com/thawts/thawts/internal/app/app.js';
 import { Events } from '@wailsio/runtime';
 
 // ─── Slash commands ───────────────────────────────────────────────────────────
@@ -45,6 +46,7 @@ let mergeSelectionIds = new Set(); // IDs selected for merge (DELTA-7a)
 
 document.addEventListener('DOMContentLoaded', () => {
   buildApp();
+  setupEscHandler(() => mode, HideWindow, ShowCapture);
   window.addEventListener('blur', () => {
     if (mode === 'braindump') setTimeout(() => HideWindow(), 200);
   });

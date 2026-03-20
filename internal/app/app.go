@@ -9,7 +9,7 @@ package app
 import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"thawts-client/internal/service"
+	"github.com/thawts/thawts/internal/service"
 )
 
 const (

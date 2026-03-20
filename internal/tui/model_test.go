@@ -6,10 +6,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	appai "thawts-client/internal/ai"
-	"thawts-client/internal/metadata"
-	"thawts-client/internal/service"
-	"thawts-client/internal/storage"
+	appai "github.com/thawts/thawts/internal/ai"
+	"github.com/thawts/thawts/internal/metadata"
+	"github.com/thawts/thawts/internal/service"
+	"github.com/thawts/thawts/internal/storage"
 )
 
 func newTestModel(t *testing.T) model {

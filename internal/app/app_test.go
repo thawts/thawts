@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	appai "thawts-client/internal/ai"
-	"thawts-client/internal/metadata"
-	"thawts-client/internal/service"
-	"thawts-client/internal/storage"
+	appai "github.com/thawts/thawts/internal/ai"
+	"github.com/thawts/thawts/internal/metadata"
+	"github.com/thawts/thawts/internal/service"
+	"github.com/thawts/thawts/internal/storage"
 )
 
 func newTestApp(t *testing.T) *App {

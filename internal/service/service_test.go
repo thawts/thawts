@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	appai "thawts-client/internal/ai"
-	"thawts-client/internal/domain"
-	"thawts-client/internal/metadata"
-	"thawts-client/internal/storage"
+	appai "github.com/thawts/thawts/internal/ai"
+	"github.com/thawts/thawts/internal/domain"
+	"github.com/thawts/thawts/internal/metadata"
+	"github.com/thawts/thawts/internal/storage"
 )
 
 func newTestService(t *testing.T) *Service {
