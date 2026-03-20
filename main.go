@@ -2,11 +2,13 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -15,8 +17,10 @@ import (
 	thawtsapp "thawts-client/internal/app"
 	"thawts-client/internal/ai"
 	"thawts-client/internal/metadata"
+	"thawts-client/internal/service"
 	"thawts-client/internal/storage"
 	"thawts-client/internal/tray"
+	"thawts-client/internal/tui"
 )
 
 //go:embed all:frontend/dist
@@ -25,7 +29,15 @@ var assets embed.FS
 //go:embed build/appicon.png
 var appIcon []byte
 
+// version is set by GoReleaser at build time via -ldflags.
+var version = "dev"
+
 func main() {
+	if slices.Contains(os.Args[1:], "--version") {
+		fmt.Println("thawts", version)
+		return
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatal(err)
@@ -37,13 +49,26 @@ func main() {
 	}
 	defer store.Close()
 
+	// Terminal UI mode: same service layer, no Wails dependency.
+	if slices.Contains(os.Args[1:], "--tui") {
+		if err := tui.Run(
+			store,
+			ai.NewLLMProvider(filepath.Join(homeDir, ".thawts", "models", "classifier.gguf")),
+			metadata.New(),
+		); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	assetsFS, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// thawtsApp is declared early so the SingleInstance closure can capture it.
-	// It is assigned before app.Run(), so it will be set by the time the callback fires.
+	// app is declared early so the SingleInstance closure can capture it.
+	// It is assigned before wailsApp.Run(), so it will be set by the time the
+	// callback fires.
 	var app *thawtsapp.App
 
 	wailsApp := application.New(application.Options{
@@ -80,13 +105,14 @@ func main() {
 		},
 	})
 
-	app = thawtsapp.NewApp(
-		wailsApp,
-		win,
+	svc := service.New(
 		store,
 		ai.NewLLMProvider(filepath.Join(homeDir, ".thawts", "models", "classifier.gguf")),
 		metadata.New(),
+		thawtsapp.NewWailsNotifier(wailsApp),
 	)
+
+	app = thawtsapp.NewApp(wailsApp, win, svc)
 
 	wailsApp.RegisterService(application.NewService(app))
 
@@ -94,6 +120,13 @@ func main() {
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		e.Cancel()
 		win.Hide()
+	})
+
+	// Hide on focus loss, but only in capture mode (review mode should stay open).
+	win.RegisterHook(events.Common.WindowLostFocus, func(_ *application.WindowEvent) {
+		if app.IsCapturing() {
+			app.HideWindow()
+		}
 	})
 
 	buildMenu(wailsApp, win, app)

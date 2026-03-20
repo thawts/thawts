@@ -1,0 +1,87 @@
+version: 2
+
+project_name: thawts
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: thawts
+    main: .
+    binary: thawts
+    # Inject the version string at build time.
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - darwin
+      - windows
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Windows ARM64 is uncommon; skip for now.
+      - goos: windows
+        goarch: arm64
+    env:
+      - CGO_ENABLED=0
+
+# ── macOS notarization ────────────────────────────────────────────────────────
+# Runs only when APPLE_TEAM_ID / APPLE_ID / APPLE_APP_PASSWORD are set.
+# Remove the "if" conditions when secrets are configured in the repo.
+notarize:
+  macos:
+    - enabled: '{{ if and (ne .Env.APPLE_ID "") (ne .Env.APPLE_TEAM_ID "") }}true{{ else }}false{{ end }}'
+      sign:
+        certificate: "Developer ID Application"
+        identity: "{{ .Env.APPLE_TEAM_ID }}"
+      notarize:
+        issuer_id: "{{ .Env.APPLE_ID }}"
+        key_id: "{{ .Env.APPLE_APP_PASSWORD }}"
+        wait: true
+        timeout: 20m
+
+archives:
+  - id: thawts
+    format: zip
+    name_template: "thawts_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  draft: false
+  prerelease: auto
+
+# ── Homebrew formula (CLI/TUI binary) ─────────────────────────────────────────
+# Pushes an updated Formula/thawts.rb to the tap repo after each release.
+# Requires HOMEBREW_TAP_TOKEN (PAT with repo write on homebrew-tap) and
+# HOMEBREW_TAP_OWNER to be set as GitHub Actions secrets.
+brews:
+  - name: thawts
+    repository:
+      owner: "{{ .Env.HOMEBREW_TAP_OWNER }}"
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://thawts.app"
+    description: "Thought capture and review — CLI/TUI mode"
+    license: MIT
+    install: |
+      bin.install "thawts"
+    test: |
+      system "#{bin}/thawts", "--version"
+    skip_upload: '{{ if and (ne .Env.HOMEBREW_TAP_TOKEN "") (ne .Env.HOMEBREW_TAP_OWNER "") }}false{{ else }}true{{ end }}'
