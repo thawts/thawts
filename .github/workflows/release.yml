@@ -43,29 +43,8 @@ jobs:
       - name: Run tests
         run: go test ./...
 
-      # ── macOS code signing ────────────────────────────────────────────────
-      # Required secrets: APPLE_CERTIFICATE (base64-encoded .p12),
-      # APPLE_CERTIFICATE_PASSWORD, APPLE_TEAM_ID, APPLE_ID, APPLE_APP_PASSWORD.
-      # Skip gracefully when secrets are not configured.
-      - name: Import macOS signing certificate
-        if: ${{ env.APPLE_CERTIFICATE != '' }}
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
-          KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" \
-            -k "$KEYCHAIN_PATH" \
-            -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-
       # ── GoReleaser ────────────────────────────────────────────────────────
+      # TODO (WP-4.3): add macOS signing step once APPLE_* secrets are configured.
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -74,8 +53,5 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           HOMEBREW_TAP_OWNER: ${{ github.repository_owner }}

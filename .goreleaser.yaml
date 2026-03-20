@@ -28,19 +28,8 @@ builds:
       - CGO_ENABLED=0
 
 # ── macOS notarization ────────────────────────────────────────────────────────
-# Runs only when APPLE_TEAM_ID / APPLE_ID / APPLE_APP_PASSWORD are set.
-# Remove the "if" conditions when secrets are configured in the repo.
-notarize:
-  macos:
-    - enabled: '{{ if and (ne .Env.APPLE_ID "") (ne .Env.APPLE_TEAM_ID "") }}true{{ else }}false{{ end }}'
-      sign:
-        certificate: "Developer ID Application"
-        identity: "{{ .Env.APPLE_TEAM_ID }}"
-      notarize:
-        issuer_id: "{{ .Env.APPLE_ID }}"
-        key_id: "{{ .Env.APPLE_APP_PASSWORD }}"
-        wait: true
-        timeout: 20m
+# TODO (WP-4.3): add notarize section once APPLE_* secrets are configured.
+# GoReleaser v2 sign schema: certificate (base64 p12) + password fields.
 
 archives:
   - id: thawts
