@@ -58,7 +58,7 @@ release:
 # Pushes an updated Formula/thawts.rb to the tap repo after each release.
 # Requires HOMEBREW_TAP_TOKEN (PAT with repo write on homebrew-tap) and
 # HOMEBREW_TAP_OWNER to be set as GitHub Actions secrets.
-homebrew_packages:
+brews:
   - name: thawts
     repository:
       owner: "{{ .Env.HOMEBREW_TAP_OWNER }}"
