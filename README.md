@@ -4,20 +4,20 @@ Thought capture and review — a minimalist tool for quickly capturing thoughts,
 
 ## Install
 
-### Homebrew (once available)
+### Homebrew
 
 ```sh
 # GUI app (macOS only)
 brew install --cask thawts
 
 # CLI/TUI binary (macOS + Linux)
-brew tap OWNER/tap
+brew tap thawts/tap
 brew install thawts
 ```
 
 ### Download
 
-Grab the latest binary from [GitHub Releases](https://github.com/OWNER/thawts-client-go/releases).
+Grab the latest binary from [GitHub Releases](https://github.com/thawts/thawts/releases).
 
 ## Usage
 

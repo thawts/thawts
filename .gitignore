@@ -21,3 +21,6 @@ typeform/
 internal/app/valhalla/
 internal/app/typeform/
 internal/tray/typeform/
+
+# Local development environment configuration (not versioned)
+DEV.md
