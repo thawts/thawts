@@ -8,8 +8,8 @@ thawts-client
 thawts-client.exe
 bin/
 
-# Wails v3 generated files (regenerated on each build)
-frontend/bindings/
+# Wails v3 generated files
+# frontend/bindings/ is committed; regenerate locally with: wails3 generate bindings -clean=true
 build/darwin/icons.icns
 
 # Task runner build cache

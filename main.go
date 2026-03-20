@@ -139,12 +139,8 @@ func main() {
 		app.ToggleCapture,
 	)
 
-	// Cmd+Option+R → open review mode
-	go registerHotkey(
-		[]hotkey.Modifier{hotkey.ModCmd, hotkey.ModOption},
-		hotkey.KeyR,
-		app.ShowReview,
-	)
+	// Cmd+Option+R → open review mode (macOS only; see hotkey_review_darwin.go)
+	registerReviewHotkey(app)
 
 	if err := wailsApp.Run(); err != nil {
 		log.Fatal(err)
