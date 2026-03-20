@@ -1,23 +1,19 @@
 package main
 
 import (
-	"context"
 	"embed"
+	"io/fs"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/menu"
-	"github.com/wailsapp/wails/v2/pkg/menu/keys"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/mac"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 	"golang.design/x/hotkey"
 
+	thawtsapp "thawts-client/internal/app"
 	"thawts-client/internal/ai"
-	"thawts-client/internal/app"
 	"thawts-client/internal/metadata"
 	"thawts-client/internal/storage"
 	"thawts-client/internal/tray"
@@ -41,96 +37,118 @@ func main() {
 	}
 	defer store.Close()
 
-	application := app.NewApp(
+	assetsFS, err := fs.Sub(assets, "frontend/dist")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// thawtsApp is declared early so the SingleInstance closure can capture it.
+	// It is assigned before app.Run(), so it will be set by the time the callback fires.
+	var app *thawtsapp.App
+
+	wailsApp := application.New(application.Options{
+		Name:        "Thawts",
+		Description: "Thought capture and review",
+		Assets: application.AssetOptions{
+			Handler: http.FileServerFS(assetsFS),
+		},
+		Mac: application.MacOptions{
+			ApplicationShouldTerminateAfterLastWindowClosed: false,
+		},
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: "e1db439e-43e1-4119-880e-37e47522e90d",
+			OnSecondInstanceLaunch: func(_ application.SecondInstanceData) {
+				if app != nil {
+					app.ShowCapture()
+				}
+			},
+		},
+	})
+
+	win := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            "Thawts",
+		Width:            1200,
+		Height:           60,
+		Frameless:        true,
+		AlwaysOnTop:      true,
+		Hidden:           true,
+		BackgroundColour: application.RGBA{Red: 0, Green: 0, Blue: 0, Alpha: 255},
+		UseApplicationMenu: true,
+		Mac: application.MacWindow{
+			TitleBar:   application.MacTitleBarHidden,
+			Appearance: application.NSAppearanceNameDarkAqua,
+		},
+	})
+
+	app = thawtsapp.NewApp(
+		wailsApp,
+		win,
 		store,
 		ai.NewLLMProvider(filepath.Join(homeDir, ".thawts", "models", "classifier.gguf")),
 		metadata.New(),
 	)
 
-	appMenu := buildMenu(application)
+	wailsApp.RegisterService(application.NewService(app))
 
-	err = wails.Run(&options.App{
-		Title:       "Thawts",
-		Width:       800,
-		Height:      60,
-		Frameless:   true,
-		AlwaysOnTop:      true,
-		HideWindowOnClose: true,
-		Menu:             appMenu,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
-		},
-		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 255},
-		OnStartup: func(ctx context.Context) {
-			application.Startup(ctx)
-			runtime.WindowHide(ctx)
-
-			tray.Init(application, appIcon)
-
-			// Ctrl+Shift+Space → toggle capture mode
-			go registerHotkey(
-				[]hotkey.Modifier{hotkey.ModShift, hotkey.ModCtrl},
-				hotkey.KeySpace,
-				application.ToggleCapture,
-			)
-
-			// Cmd+Option+R → open review mode
-			go registerHotkey(
-				[]hotkey.Modifier{hotkey.ModCmd, hotkey.ModOption},
-				hotkey.KeyR,
-				application.ShowReview,
-			)
-		},
-		Bind: []interface{}{application},
-		Mac: &mac.Options{
-			TitleBar:             mac.TitleBarHidden(),
-			Appearance:           mac.NSAppearanceNameDarkAqua,
-			WebviewIsTransparent: false,
-			WindowIsTranslucent:  false,
-		},
-		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId: "e1db439e-43e1-4119-880e-37e47522e90d",
-			OnSecondInstanceLaunch: func(_ options.SecondInstanceData) {
-				application.ShowCapture()
-			},
-		},
+	// Hide instead of close — keeps the app alive in the tray.
+	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		e.Cancel()
+		win.Hide()
 	})
 
-	if err != nil {
+	buildMenu(wailsApp, win, app)
+	tray.Init(wailsApp, appIcon, app)
+
+	// Ctrl+Shift+Space → toggle capture mode
+	go registerHotkey(
+		[]hotkey.Modifier{hotkey.ModShift, hotkey.ModCtrl},
+		hotkey.KeySpace,
+		app.ToggleCapture,
+	)
+
+	// Cmd+Option+R → open review mode
+	go registerHotkey(
+		[]hotkey.Modifier{hotkey.ModCmd, hotkey.ModOption},
+		hotkey.KeyR,
+		app.ShowReview,
+	)
+
+	if err := wailsApp.Run(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func buildMenu(application *app.App) *menu.Menu {
-	m := menu.NewMenu()
+func buildMenu(wailsApp *application.App, win *application.WebviewWindow, app *thawtsapp.App) {
+	m := application.NewMenu()
 
 	file := m.AddSubmenu("File")
-	file.AddText("Capture Thought", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
-		application.ShowCapture()
+	file.Add("Capture Thought").OnClick(func(*application.Context) {
+		app.ShowCapture()
 	})
-	file.AddText("Review Garden", keys.Combo("r", keys.CmdOrCtrlKey, keys.OptionOrAltKey), func(_ *menu.CallbackData) {
-		application.ShowReview()
+	file.Add("Review Garden").OnClick(func(*application.Context) {
+		app.ShowReview()
 	})
 	file.AddSeparator()
-	file.AddText("Quit", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
-		application.Quit()
+	file.Add("Quit").OnClick(func(*application.Context) {
+		app.Quit()
 	})
 
 	edit := m.AddSubmenu("Edit")
-	edit.AddText("Cut", keys.CmdOrCtrl("x"), func(_ *menu.CallbackData) {
-		runtime.WindowExecJS(application.Context(), "document.execCommand('cut')")
+	edit.Add("Cut").OnClick(func(*application.Context) {
+		win.ExecJS("document.execCommand('cut')")
 	})
-	edit.AddText("Copy", keys.CmdOrCtrl("c"), func(_ *menu.CallbackData) {
-		runtime.WindowExecJS(application.Context(), "document.execCommand('copy')")
+	edit.Add("Copy").OnClick(func(*application.Context) {
+		win.ExecJS("document.execCommand('copy')")
 	})
-	edit.AddText("Paste", keys.CmdOrCtrl("v"), func(_ *menu.CallbackData) {
-		runtime.WindowExecJS(application.Context(), "document.execCommand('paste')")
+	edit.Add("Paste").OnClick(func(*application.Context) {
+		win.ExecJS("document.execCommand('paste')")
 	})
-	edit.AddText("Select All", keys.CmdOrCtrl("a"), func(_ *menu.CallbackData) {
-		runtime.WindowExecJS(application.Context(), "document.execCommand('selectAll')")
+	edit.Add("Select All").OnClick(func(*application.Context) {
+		win.ExecJS("document.execCommand('selectAll')")
 	})
 
-	return m
+	win.SetMenu(m)
+	_ = wailsApp
 }
 
 func registerHotkey(mods []hotkey.Modifier, key hotkey.Key, fn func()) {

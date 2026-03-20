@@ -18,7 +18,7 @@ func newTestApp(t *testing.T) *App {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	a := NewApp(store, appai.NewStubProvider(), metadata.NewStubProvider())
+	a := NewApp(nil, nil, store, appai.NewStubProvider(), metadata.NewStubProvider())
 	a.SetTestMode(true)
 	return a
 }

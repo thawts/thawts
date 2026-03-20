@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"thawts-client/internal/ai"
 	"thawts-client/internal/domain"
@@ -40,16 +40,16 @@ func cosineSimilarity(a, b []float32) float32 {
 }
 
 const (
-	captureWidth  = 800
+	windowWidth   = 1200
 	captureHeight = 60
-	reviewWidth   = 1200
 	reviewHeight  = 750
 )
 
 // App is the Wails application struct. All exported methods are callable from
 // the frontend via the generated JS bindings.
 type App struct {
-	ctx      context.Context
+	wailsApp *application.App
+	window   *application.WebviewWindow
 	store    storage.Storage
 	ai       ai.Provider
 	meta     metadata.Provider
@@ -60,31 +60,25 @@ type App struct {
 	// that was active when the hotkey was triggered (not Thawts itself).
 	captureCtxMu sync.Mutex
 	captureCtx   domain.CaptureContext
+
 }
 
 // NewApp constructs the App with its dependencies injected.
-func NewApp(store storage.Storage, aiProvider ai.Provider, metaProvider metadata.Provider) *App {
+// Pass nil for wailsApp and window when constructing for unit tests (use SetTestMode(true)).
+func NewApp(wailsApp *application.App, window *application.WebviewWindow, store storage.Storage, aiProvider ai.Provider, metaProvider metadata.Provider) *App {
 	return &App{
-		store: store,
-		ai:    aiProvider,
-		meta:  metaProvider,
+		wailsApp: wailsApp,
+		window:   window,
+		store:    store,
+		ai:       aiProvider,
+		meta:     metaProvider,
 	}
-}
-
-// Startup is called by Wails once the application context is ready.
-func (a *App) Startup(ctx context.Context) {
-	a.ctx = ctx
-}
-
-// Context returns the Wails runtime context (used by main.go for menu callbacks).
-func (a *App) Context() context.Context {
-	return a.ctx
 }
 
 // Quit shuts down the application.
 func (a *App) Quit() {
 	if !a.testMode {
-		runtime.Quit(a.ctx)
+		a.wailsApp.Quit()
 	}
 }
 
@@ -154,8 +148,8 @@ func (a *App) classifyAsync(id int64, content string) {
 			log.Printf("hideThought %d: %v", id, err)
 		} else {
 			a.store.AddTag(id, "mishap", "ai", 0.9)
-			if !a.testMode && a.ctx != nil {
-				runtime.EventsEmit(a.ctx, "mishaps:changed")
+			if !a.testMode {
+				a.wailsApp.Event.Emit("mishaps:changed")
 			}
 		}
 	} else {
@@ -179,8 +173,8 @@ func (a *App) classifyAsync(id int64, content string) {
 					saved++
 				}
 			}
-			if saved > 0 && !a.testMode && a.ctx != nil {
-				runtime.EventsEmit(a.ctx, "intents:changed")
+			if saved > 0 && !a.testMode {
+				a.wailsApp.Event.Emit("intents:changed")
 			}
 		}
 	}
@@ -211,8 +205,8 @@ func (a *App) classifyAsync(id int64, content string) {
 	}
 
 	// Notify the frontend that the thought has been enriched.
-	if !a.testMode && a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "thought:classified", id)
+	if !a.testMode {
+		a.wailsApp.Event.Emit("thought:classified", id)
 	}
 }
 
@@ -224,8 +218,8 @@ func (a *App) checkWellbeingTrend() {
 		return
 	}
 	if avg < -0.4 {
-		if !a.testMode && a.ctx != nil {
-			runtime.EventsEmit(a.ctx, "wellbeing:alert", avg)
+		if !a.testMode {
+			a.wailsApp.Event.Emit("wellbeing:alert", avg)
 		}
 	}
 }
@@ -354,8 +348,8 @@ func (a *App) MergeThoughts(ids []int64) (*domain.Thought, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !a.testMode && a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "thoughts:merged")
+	if !a.testMode {
+		a.wailsApp.Event.Emit("thoughts:merged")
 	}
 	return merged, nil
 }
@@ -402,8 +396,8 @@ func (a *App) ConfirmIntent(intentID string) error {
 	if err == nil {
 		go a.createNativeEvent(intent)
 	}
-	if !a.testMode && a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "intents:changed")
+	if !a.testMode {
+		a.wailsApp.Event.Emit("intents:changed")
 	}
 	return nil
 }
@@ -413,8 +407,8 @@ func (a *App) DismissIntent(intentID string) error {
 	if err := a.store.DismissIntent(intentID); err != nil {
 		return err
 	}
-	if !a.testMode && a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "intents:changed")
+	if !a.testMode {
+		a.wailsApp.Event.Emit("intents:changed")
 	}
 	return nil
 }
@@ -473,8 +467,8 @@ func (a *App) GetSentimentTrend(days int) (float32, error) {
 
 // --- Window / Mode control ---
 
-// ShowCapture switches to capture mode: small frameless bar, always on top.
-// Preserves the current window position so the input bar doesn't jump.
+// ShowCapture switches to capture mode: thin bar, always on top.
+// Width stays the same as review mode so the input field never moves.
 func (a *App) ShowCapture() {
 	if a.testMode {
 		return
@@ -486,26 +480,28 @@ func (a *App) ShowCapture() {
 	a.captureCtx = ctx
 	a.captureCtxMu.Unlock()
 
-	x, y := runtime.WindowGetPosition(a.ctx)
-	runtime.WindowSetSize(a.ctx, captureWidth, captureHeight)
-	runtime.WindowSetPosition(a.ctx, x, y)
-	runtime.WindowSetAlwaysOnTop(a.ctx, true)
-	runtime.WindowShow(a.ctx)
-	runtime.EventsEmit(a.ctx, "mode:capture")
+	x, y := a.window.Position()
+	a.window.SetSize(windowWidth, captureHeight)
+	a.window.SetPosition(x, y) // re-pin top after SetSize shifts the anchor
+	a.window.SetAlwaysOnTop(true)
+	a.window.Show()
+	a.window.Focus()
+	a.wailsApp.Event.Emit("mode:capture")
 }
 
-// ShowReview switches to review mode: larger window, standard chrome.
-// Preserves the current window position so the input bar doesn't jump.
+// ShowReview switches to review mode, expanding the window downward.
+// X position is unchanged so the input bar stays at the same screen location.
 func (a *App) ShowReview() {
 	if a.testMode {
 		return
 	}
-	x, y := runtime.WindowGetPosition(a.ctx)
-	runtime.WindowSetSize(a.ctx, reviewWidth, reviewHeight)
-	runtime.WindowSetPosition(a.ctx, x, y)
-	runtime.WindowSetAlwaysOnTop(a.ctx, false)
-	runtime.WindowShow(a.ctx)
-	runtime.EventsEmit(a.ctx, "mode:review")
+	x, y := a.window.Position()
+	a.window.SetSize(windowWidth, reviewHeight)
+	a.window.SetPosition(x, y) // re-pin top after SetSize shifts the anchor
+	a.window.SetAlwaysOnTop(false)
+	a.window.Show()
+	a.window.Focus()
+	a.wailsApp.Event.Emit("mode:review")
 }
 
 // HideWindow hides the application window.
@@ -513,10 +509,12 @@ func (a *App) HideWindow() {
 	if a.testMode {
 		return
 	}
-	runtime.WindowHide(a.ctx)
+	a.window.Hide()
 }
 
-// ToggleCapture shows capture mode centered on screen (initial appearance via hotkey).
+// ToggleCapture shows capture mode via the global hotkey.
+// The window is centered using review dimensions so that expanding to review
+// later only changes the height — the top-left position stays identical.
 func (a *App) ToggleCapture() {
 	if a.testMode {
 		return
@@ -528,11 +526,18 @@ func (a *App) ToggleCapture() {
 	a.captureCtx = ctx
 	a.captureCtxMu.Unlock()
 
-	runtime.WindowSetSize(a.ctx, captureWidth, captureHeight)
-	runtime.WindowSetAlwaysOnTop(a.ctx, true)
-	runtime.WindowCenter(a.ctx)
-	runtime.WindowShow(a.ctx)
-	runtime.EventsEmit(a.ctx, "mode:capture")
+	// Center using review dimensions to get the top-left position that will
+	// make the review window perfectly centered. Then shrink to capture height
+	// while keeping that same top position, so the two modes share a position.
+	a.window.SetSize(windowWidth, reviewHeight)
+	a.window.Center()
+	x, y := a.window.Position() // top-origin coordinates
+	a.window.SetSize(windowWidth, captureHeight)
+	a.window.SetPosition(x, y) // pin the top back — SetSize anchors bottom-left, not top
+	a.window.SetAlwaysOnTop(true)
+	a.window.Show()
+	a.window.Focus()
+	a.wailsApp.Event.Emit("mode:capture")
 }
 
 // SetCaptureHeight resizes the capture window height as the thought list grows.
@@ -540,5 +545,5 @@ func (a *App) SetCaptureHeight(h int) {
 	if a.testMode {
 		return
 	}
-	runtime.WindowSetSize(a.ctx, captureWidth, h)
+	a.window.SetSize(windowWidth, h)
 }

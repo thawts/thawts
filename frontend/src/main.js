@@ -18,8 +18,8 @@ import {
   GetSentimentTrend,
   MergeThoughts,
   CleanText,
-} from '../wailsjs/go/app/App.js';
-import { EventsOn } from '../wailsjs/runtime/runtime.js';
+} from '../bindings/thawts-client/internal/app/app.js';
+import { Events } from '@wailsio/runtime';
 
 // ─── Slash commands ───────────────────────────────────────────────────────────
 
@@ -50,13 +50,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-EventsOn('mode:capture', () => enterBraindump());
-EventsOn('mode:review',  () => enterReview());
-EventsOn('thought:classified', () => { if (mode === 'review') refreshGarden(); });
-EventsOn('mishaps:changed', () => { if (mode === 'review') refreshMishapBadge(); });
-EventsOn('intents:changed', () => { if (mode === 'review') refreshIntentsBadge(); });
-EventsOn('thoughts:merged', () => { if (mode === 'review') refreshGarden(); });
-EventsOn('wellbeing:alert', () => { if (mode === 'review') checkAndShowWellbeingCard(); });
+Events.On('mode:capture', () => enterBraindump());
+Events.On('mode:review',  () => enterReview());
+Events.On('thought:classified', () => { if (mode === 'review') refreshGarden(); });
+Events.On('mishaps:changed', () => { if (mode === 'review') refreshMishapBadge(); });
+Events.On('intents:changed', () => { if (mode === 'review') refreshIntentsBadge(); });
+Events.On('thoughts:merged', () => { if (mode === 'review') refreshGarden(); });
+Events.On('wellbeing:alert', () => { if (mode === 'review') checkAndShowWellbeingCard(); });
 
 function buildApp() {
   document.getElementById('app').innerHTML = `
@@ -96,7 +96,7 @@ function enterBraindump() {
   document.getElementById('garden-area').style.display = 'none';
   document.getElementById('garden-area').innerHTML = '';
   const input = document.getElementById('thought-input');
-  if (input) { input.placeholder = 'What\'s on your mind…'; input.value = ''; input.focus(); }
+  if (input) { input.placeholder = 'What\'s on your mind…'; input.value = ''; setTimeout(() => input.focus(), 50); }
   SetCaptureHeight(60);
 }
 
@@ -107,7 +107,7 @@ function enterReview() {
   gardenArea.style.display = 'flex';
   mountGarden(gardenArea);
   const input = document.getElementById('thought-input');
-  if (input) { input.placeholder = 'Search garden…'; input.value = ''; input.focus(); }
+  if (input) { input.placeholder = 'Search garden…'; input.value = ''; setTimeout(() => input.focus(), 50); }
   refreshGarden();
   checkAndShowWellbeingCard();
 }

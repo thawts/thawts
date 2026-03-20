@@ -6,6 +6,14 @@ frontend/dist
 # Compiled binaries
 thawts-client
 thawts-client.exe
+bin/
+
+# Wails v3 generated files (regenerated on each build)
+frontend/bindings/
+build/darwin/icons.icns
+
+# Task runner build cache
+.task/
 
 # ML model weights (large files, not versioned)
 valhalla/
