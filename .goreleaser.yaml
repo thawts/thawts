@@ -54,6 +54,7 @@ changelog:
 release:
   draft: false
   prerelease: auto
+  replace_existing_artifacts: true
 
 # ── Homebrew formula (CLI/TUI binary) ─────────────────────────────────────────
 # Pushes an updated Formula/thawts.rb to the tap repo after each release.

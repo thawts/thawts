@@ -52,6 +52,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.prep.outputs.tag }}
 
+      - name: Fetch tags
+        run: git fetch --tags --force
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -87,6 +90,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           HOMEBREW_TAP_OWNER: ${{ github.repository_owner }}
+          GORELEASER_CURRENT_TAG: ${{ needs.prep.outputs.tag }}
 
   # ── Linux native builds ───────────────────────────────────────────────────
   release-linux:
