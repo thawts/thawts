@@ -15,9 +15,9 @@ builds:
       - -s -w -X main.version={{ .Version }}
     # Wails requires CGO and native system libraries (WebKit/WebView2).
     # Cross-compilation is not supported — each platform needs its own
-    # native runner. For now we build macOS only (arm64 + amd64 both work
-    # on an Apple Silicon runner). Linux and Windows will be added later
-    # via a matrix of native runners.
+    # native runner. GoReleaser handles macOS; Linux (amd64 + arm64) and
+    # Windows (amd64) are built by the release-linux / release-windows jobs
+    # in .github/workflows/release.yml and uploaded to the same release.
     goos:
       - darwin
     goarch:
