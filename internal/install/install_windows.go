@@ -17,7 +17,8 @@ func Register(execPath string) error {
 		return err
 	}
 	defer key.Close()
-	return key.SetStringValue(runValue, execPath)
+	// Quote the path so Windows handles spaces in directory names correctly.
+	return key.SetStringValue(runValue, `"`+execPath+`"`)
 }
 
 func Unregister() error {

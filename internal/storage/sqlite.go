@@ -116,6 +116,7 @@ func (s *SQLiteStorage) migrate() error {
 		`ALTER TABLE thoughts ADD COLUMN url          TEXT    NOT NULL DEFAULT ''`,
 		`ALTER TABLE thoughts ADD COLUMN hidden       INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE thoughts ADD COLUMN meta         TEXT`,
+		`ALTER TABLE thoughts ADD COLUMN updated_at   TEXT    NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range alterStmts {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {

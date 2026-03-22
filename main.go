@@ -214,9 +214,11 @@ func executablePath() (string, error) {
 func registerHotkey(mods []hotkey.Modifier, key hotkey.Key, fn func()) {
 	hk := hotkey.New(mods, key)
 	if err := hk.Register(); err != nil {
-		log.Printf("hotkey register failed: %v", err)
+		log.Printf("WARNING: global hotkey registration failed: %v", err)
+		log.Printf("         Ctrl+Shift+Space will not work. Use the system tray icon or run 'thawts' again to open the capture window.")
 		return
 	}
+	log.Printf("global hotkey Ctrl+Shift+Space registered successfully")
 	for range hk.Keydown() {
 		fn()
 	}
