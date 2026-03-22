@@ -14,22 +14,43 @@ permissions:
   contents: write
 
 jobs:
+  # ── Resolve or create the tag ─────────────────────────────────────────────
+  # Outputs the canonical tag (e.g. v1.2.3) so all build jobs share one value.
+  prep:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="v${{ github.event.inputs.version }}"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  # ── macOS build via GoReleaser (also creates the GitHub release) ──────────
   release-macos:
     name: Release (macOS)
+    needs: prep
     runs-on: macos-latest
 
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # GoReleaser needs full history for changelog
-
-      - name: Create and push tag
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${{ github.event.inputs.version }}" -m "Release v${{ github.event.inputs.version }}"
-          git push origin "v${{ github.event.inputs.version }}"
+          fetch-depth: 0
+          ref: ${{ needs.prep.outputs.tag }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -55,7 +76,6 @@ jobs:
       - name: Run tests
         run: go test ./...
 
-      # ── GoReleaser ────────────────────────────────────────────────────────
       # TODO (WP-4.3): add macOS signing step once APPLE_* secrets are configured.
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -69,10 +89,9 @@ jobs:
           HOMEBREW_TAP_OWNER: ${{ github.repository_owner }}
 
   # ── Linux native builds ───────────────────────────────────────────────────
-  # Runs after GoReleaser has created the release, then uploads Linux zips.
   release-linux:
     name: Release (Linux ${{ matrix.goarch }})
-    needs: release-macos
+    needs: [prep, release-macos]
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -84,6 +103,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prep.outputs.tag }}
 
       - name: Install system dependencies
         run: |
@@ -111,11 +132,10 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Set version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
-
       - name: Build binary
-        run: go build -ldflags="-s -w -X main.version=${{ env.VERSION }}" -o thawts .
+        run: |
+          VERSION="${{ needs.prep.outputs.tag }}"
+          go build -ldflags="-s -w -X main.version=${VERSION#v}" -o thawts .
         env:
           CGO_ENABLED: "1"
 
@@ -123,18 +143,20 @@ jobs:
         run: zip thawts_linux_${{ matrix.goarch }}.zip thawts README.md
 
       - name: Upload to release
-        run: gh release upload ${{ github.ref_name }} thawts_linux_${{ matrix.goarch }}.zip
+        run: gh release upload ${{ needs.prep.outputs.tag }} thawts_linux_${{ matrix.goarch }}.zip
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── Windows native build ──────────────────────────────────────────────────
   release-windows:
     name: Release (Windows amd64)
-    needs: release-macos
+    needs: [prep, release-macos]
     runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prep.outputs.tag }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -157,12 +179,11 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Set version
-        shell: bash
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
-
       - name: Build binary
-        run: go build -ldflags="-s -w -X main.version=${{ env.VERSION }}" -o thawts.exe .
+        shell: bash
+        run: |
+          VERSION="${{ needs.prep.outputs.tag }}"
+          go build -ldflags="-s -w -X main.version=${VERSION#v}" -o thawts.exe .
         env:
           CGO_ENABLED: "1"
 
@@ -172,6 +193,6 @@ jobs:
 
       - name: Upload to release
         shell: bash
-        run: gh release upload ${{ github.ref_name }} thawts_windows_amd64.zip
+        run: gh release upload ${{ needs.prep.outputs.tag }} thawts_windows_amd64.zip
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
