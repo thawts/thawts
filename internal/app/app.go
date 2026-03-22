@@ -65,10 +65,10 @@ func (a *App) ShowCapture() {
 	a.window.SetPosition(x, y)
 	a.window.SetAlwaysOnTop(true)
 	a.shownAt = time.Now()
+	a.isCapturing = true
 	a.window.Show()
 	a.window.Focus()
 	a.wailsApp.Event.Emit("mode:capture")
-	a.isCapturing = true
 }
 
 // ShowReview switches to review mode, expanding the window downward.
@@ -89,10 +89,15 @@ func (a *App) HideWindow() {
 	a.isCapturing = false
 }
 
-// ToggleCapture shows capture mode via the global hotkey, centering the window.
-// Centers using review dimensions first so that expanding to review later only
-// changes the height — the top-left position stays identical.
+// ToggleCapture toggles capture mode via the global hotkey.
+// If the window is already visible in capture mode it is hidden; otherwise it
+// is centered on screen and shown. Centers using review dimensions first so
+// that expanding to review later only changes the height.
 func (a *App) ToggleCapture() {
+	if a.isCapturing {
+		a.HideWindow()
+		return
+	}
 	a.PrepareCapture()
 	a.window.SetSize(windowWidth, reviewHeight)
 	a.window.Center()
@@ -101,10 +106,10 @@ func (a *App) ToggleCapture() {
 	a.window.SetPosition(x, y)
 	a.window.SetAlwaysOnTop(true)
 	a.shownAt = time.Now()
+	a.isCapturing = true
 	a.window.Show()
 	a.window.Focus()
 	a.wailsApp.Event.Emit("mode:capture")
-	a.isCapturing = true
 }
 
 // SetCaptureHeight resizes the capture window height as the thought list grows.

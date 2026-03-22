@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -144,14 +145,16 @@ func main() {
 	})
 
 	// Hide on focus loss, but only in capture mode (review mode should stay open).
-	// A 300 ms grace period prevents the window from hiding itself immediately
-	// after being shown via the tray icon or hotkey (Windows loses focus briefly
-	// during the tray interaction before the window becomes active).
-	win.RegisterHook(events.Common.WindowLostFocus, func(_ *application.WindowEvent) {
-		if app.ShouldHideOnFocusLoss() {
-			app.HideWindow()
-		}
-	})
+	// On Windows the focus mechanics after tray/hotkey interactions cause spurious
+	// focus-loss events that hide the window immediately — disable auto-hide there
+	// and rely on the hotkey toggle and Esc key instead.
+	if runtime.GOOS != "windows" {
+		win.RegisterHook(events.Common.WindowLostFocus, func(_ *application.WindowEvent) {
+			if app.IsCapturing() {
+				app.HideWindow()
+			}
+		})
+	}
 
 	buildMenu(wailsApp, win, app)
 	tray.Init(wailsApp, appIcon, app)
