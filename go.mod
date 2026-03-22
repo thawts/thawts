@@ -8,6 +8,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/wailsapp/wails/v3 v3.0.0-alpha.74
 	golang.design/x/hotkey v0.4.1
+	golang.org/x/sys v0.40.0
 	modernc.org/sqlite v1.44.3
 )
 
@@ -70,7 +71,6 @@ require (
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
 	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	modernc.org/libc v1.67.6 // indirect

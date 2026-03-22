@@ -16,6 +16,7 @@ import (
 
 	thawtsapp "github.com/thawts/thawts/internal/app"
 	"github.com/thawts/thawts/internal/ai"
+	"github.com/thawts/thawts/internal/install"
 	"github.com/thawts/thawts/internal/metadata"
 	"github.com/thawts/thawts/internal/service"
 	"github.com/thawts/thawts/internal/storage"
@@ -35,6 +36,26 @@ var version = "dev"
 func main() {
 	if slices.Contains(os.Args[1:], "--version") {
 		fmt.Println("thawts", version)
+		return
+	}
+
+	if slices.Contains(os.Args[1:], "--install") {
+		execPath, err := executablePath()
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := install.Register(execPath); err != nil {
+			log.Fatal("install failed: ", err)
+		}
+		fmt.Println("thawts will now start automatically on login.")
+		return
+	}
+
+	if slices.Contains(os.Args[1:], "--uninstall") {
+		if err := install.Unregister(); err != nil {
+			log.Fatal("uninstall failed: ", err)
+		}
+		fmt.Println("thawts removed from login items.")
 		return
 	}
 
@@ -178,6 +199,16 @@ func buildMenu(wailsApp *application.App, win *application.WebviewWindow, app *t
 
 	win.SetMenu(m)
 	_ = wailsApp
+}
+
+// executablePath returns the absolute path to the running binary, resolving symlinks.
+// This ensures --install points to the real binary, not a Homebrew symlink.
+func executablePath() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(exe)
 }
 
 func registerHotkey(mods []hotkey.Modifier, key hotkey.Key, fn func()) {

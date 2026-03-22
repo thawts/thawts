@@ -1,34 +1,34 @@
 # Thawts
 
-Thought capture and review — a minimalist tool for quickly capturing thoughts, ideas, and tasks. Available as a **desktop GUI app** (macOS) and a **terminal TUI** (macOS, Linux, Windows).
+Thought capture and review — a minimalist tool for quickly capturing thoughts, ideas, and tasks. Available on macOS, Linux, and Windows.
 
 ## Install
 
-### Homebrew
+### Homebrew (macOS + Linux)
 
 ```sh
-# GUI app (macOS only)
-brew install --cask thawts
-
-# CLI/TUI binary (macOS + Linux)
 brew tap thawts/tap
 brew install thawts
 ```
 
 ### Download
 
-Grab the latest binary from [GitHub Releases](https://github.com/thawts/thawts/releases).
+Grab the latest binary for your platform from [GitHub Releases](https://github.com/thawts/thawts/releases).
 
 ## Usage
 
 ### GUI Mode (default)
 
-Launch the `.app` bundle or run the binary without flags. The app lives in your menu bar — no Dock icon.
+Run `thawts` to start the app. It lives in your system tray — no Dock icon. Register it to start automatically on login:
+
+```sh
+thawts --install
+```
 
 | Action | Shortcut |
 |---|---|
 | Show/hide capture window | `Ctrl+Shift+Space` |
-| Open review | `Cmd+Option+R` |
+| Open review | `Cmd+Option+R` (macOS) |
 | Hide window | `Esc` or click away |
 
 The window auto-hides when it loses focus (capture mode only).
@@ -50,11 +50,22 @@ thawts --tui
 | `e` | Edit selected thought |
 | `/` | Focus search |
 
-### Other flags
+### All flags
 
 ```sh
-thawts --version   # print version and exit
+thawts --install    # register thawts to start automatically on login
+thawts --uninstall  # remove thawts from login items
+thawts --tui        # run the terminal UI instead of the GUI
+thawts --version    # print version and exit
 ```
+
+`--install` uses the appropriate mechanism for each platform:
+
+| Platform | Mechanism |
+|---|---|
+| macOS | `~/Library/LaunchAgents/` (launchd) |
+| Linux | systemd user service, or `~/.config/autostart/` (XDG) |
+| Windows | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (registry) |
 
 ## Data
 
