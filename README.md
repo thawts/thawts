@@ -53,8 +53,18 @@ thawts --tui
 ### Other flags
 
 ```sh
-thawts --version   # print version and exit
+thawts --version    # print version and exit
+thawts --install    # register thawts to start automatically on login
+thawts --uninstall  # remove thawts from login items
 ```
+
+`--install` uses the appropriate mechanism for each platform:
+
+| Platform | Mechanism |
+|---|---|
+| macOS | `~/Library/LaunchAgents/` (launchd) |
+| Linux | systemd user service, or `~/.config/autostart/` (XDG) |
+| Windows | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (registry) |
 
 ## Data
 
