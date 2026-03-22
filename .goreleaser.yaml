@@ -25,6 +25,7 @@ builds:
       - arm64
     env:
       - CGO_ENABLED=1
+      - MACOSX_DEPLOYMENT_TARGET=12.0
 
 # ── macOS notarization ────────────────────────────────────────────────────────
 # TODO (WP-4.3): add notarize section once APPLE_* secrets are configured.
