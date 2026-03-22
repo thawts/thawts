@@ -60,11 +60,32 @@ jobs:
         run: go build -o nul ./...
         if: runner.os == 'Windows'
 
-  build:
-    name: Build (${{ matrix.archive }})
+  prepare-nightly:
+    name: Prepare nightly release
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recreate nightly release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
+          SHORT_SHA="${GITHUB_SHA::8}"
+          gh release create nightly \
+            --prerelease \
+            --title "Development build (${SHORT_SHA})" \
+            --notes "Latest build from the \`main\` branch. Commit: ${GITHUB_SHA}. Replaced on every push to \`main\`."
+
+  build:
+    name: Build (${{ matrix.archive }})
+    needs: prepare-nightly
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -129,9 +150,8 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path ${{ matrix.artifact }}, README.md -DestinationPath ${{ matrix.archive }}
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.archive }}
-          path: ${{ matrix.archive }}
-          retention-days: 1
+      - name: Upload to nightly release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload nightly ${{ matrix.archive }}

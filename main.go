@@ -144,8 +144,11 @@ func main() {
 	})
 
 	// Hide on focus loss, but only in capture mode (review mode should stay open).
+	// A 300 ms grace period prevents the window from hiding itself immediately
+	// after being shown via the tray icon or hotkey (Windows loses focus briefly
+	// during the tray interaction before the window becomes active).
 	win.RegisterHook(events.Common.WindowLostFocus, func(_ *application.WindowEvent) {
-		if app.IsCapturing() {
+		if app.ShouldHideOnFocusLoss() {
 			app.HideWindow()
 		}
 	})

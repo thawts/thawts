@@ -7,6 +7,8 @@
 package app
 
 import (
+	"time"
+
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/thawts/thawts/internal/service"
@@ -25,6 +27,7 @@ type App struct {
 	wailsApp    *application.App
 	window      *application.WebviewWindow
 	isCapturing bool
+	shownAt     time.Time
 }
 
 // NewApp constructs the Wails adapter with its dependencies.
@@ -37,9 +40,16 @@ func NewApp(wailsApp *application.App, window *application.WebviewWindow, svc *s
 }
 
 // IsCapturing reports whether the window is currently in capture mode.
-// Used by the focus-loss hook to decide whether to auto-hide.
 func (a *App) IsCapturing() bool {
 	return a.isCapturing
+}
+
+// ShouldHideOnFocusLoss reports whether the focus-loss hook should hide the
+// window. Returns false for a short grace period after the window is shown so
+// that the tray-click or hotkey interaction does not immediately steal focus
+// back before the window has a chance to become active.
+func (a *App) ShouldHideOnFocusLoss() bool {
+	return a.isCapturing && time.Since(a.shownAt) > 300*time.Millisecond
 }
 
 // Quit shuts down the application.
@@ -54,6 +64,7 @@ func (a *App) ShowCapture() {
 	a.window.SetSize(windowWidth, captureHeight)
 	a.window.SetPosition(x, y)
 	a.window.SetAlwaysOnTop(true)
+	a.shownAt = time.Now()
 	a.window.Show()
 	a.window.Focus()
 	a.wailsApp.Event.Emit("mode:capture")
@@ -89,6 +100,7 @@ func (a *App) ToggleCapture() {
 	a.window.SetSize(windowWidth, captureHeight)
 	a.window.SetPosition(x, y)
 	a.window.SetAlwaysOnTop(true)
+	a.shownAt = time.Now()
 	a.window.Show()
 	a.window.Focus()
 	a.wailsApp.Event.Emit("mode:capture")
