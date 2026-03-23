@@ -15,7 +15,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	thawtsapp "github.com/thawts/thawts/internal/app"
-	"github.com/thawts/thawts/internal/ai"
+	"github.com/thawts/thawts/internal/ai/onnx"
 	"github.com/thawts/thawts/internal/install"
 	"github.com/thawts/thawts/internal/metadata"
 	"github.com/thawts/thawts/internal/service"
@@ -74,7 +74,7 @@ func main() {
 	if slices.Contains(os.Args[1:], "--tui") {
 		if err := tui.Run(
 			store,
-			ai.NewLLMProvider(filepath.Join(homeDir, ".thawts", "models", "classifier.gguf")),
+			onnx.NewProvider(),
 			metadata.New(),
 		); err != nil {
 			log.Fatal(err)
@@ -128,7 +128,7 @@ func main() {
 
 	svc := service.New(
 		store,
-		ai.NewLLMProvider(filepath.Join(homeDir, ".thawts", "models", "classifier.gguf")),
+		onnx.NewProvider(),
 		metadata.New(),
 		thawtsapp.NewWailsNotifier(wailsApp),
 	)

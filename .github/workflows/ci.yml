@@ -49,16 +49,32 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Run tests
+      # Stub build — runs on all platforms, no AI deps required.
+      - name: Run tests (stub AI provider)
         run: go test ./...
 
-      - name: Build binary (smoke check)
-        run: go build -o /dev/null ./...
+      # ONNX build — downloads model + native libs, runs on macOS and Linux only.
+      # Windows is excluded until a Windows embed file is added.
+      - name: Download AI model and native libs
         if: runner.os != 'Windows'
+        shell: bash
+        run: bash scripts/download_ai_deps.sh
 
-      - name: Build binary (smoke check, Windows)
-        run: go build -o nul ./...
+      - name: Run tests (ONNX AI provider)
+        if: runner.os != 'Windows'
+        run: go test -tags with_onnx -timeout 120s ./internal/ai/onnx/...
+
+      - name: Build binary — stub (smoke check)
+        if: runner.os != 'Windows'
+        run: go build -o /dev/null ./...
+
+      - name: Build binary — stub (smoke check, Windows)
         if: runner.os == 'Windows'
+        run: go build -o nul ./...
+
+      - name: Build binary — with ONNX (smoke check)
+        if: runner.os != 'Windows'
+        run: go build -tags with_onnx -o /dev/null ./...
 
   prepare-nightly:
     name: Prepare nightly release
@@ -93,15 +109,19 @@ jobs:
           - os: macos-latest
             artifact: thawts
             archive: thawts-darwin-arm64.zip
+            onnx: true
           - os: ubuntu-latest
             artifact: thawts
             archive: thawts-linux-amd64.zip
+            onnx: true
           - os: ubuntu-24.04-arm
             artifact: thawts
             archive: thawts-linux-arm64.zip
+            onnx: true
           - os: windows-latest
             artifact: thawts.exe
             archive: thawts-windows-amd64.zip
+            onnx: false
 
     steps:
       - uses: actions/checkout@v4
@@ -133,7 +153,22 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Build binary
+      - name: Download AI model and native libs
+        if: matrix.onnx == true
+        shell: bash
+        run: bash scripts/download_ai_deps.sh
+
+      - name: Build binary (with ONNX)
+        if: matrix.onnx == true
+        shell: bash
+        run: |
+          VERSION="dev-${GITHUB_SHA::8}"
+          go build -tags with_onnx -ldflags="-s -w -X main.version=${VERSION}" -o ${{ matrix.artifact }} .
+        env:
+          CGO_ENABLED: "1"
+
+      - name: Build binary (stub, Windows)
+        if: matrix.onnx == false
         shell: bash
         run: |
           VERSION="dev-${GITHUB_SHA::8}"

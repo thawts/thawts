@@ -15,12 +15,15 @@ build/darwin/icons.icns
 # Task runner build cache
 .task/
 
-# ML model weights (large files, not versioned)
+# ML model weights and native libs (large files, not versioned)
+# Run scripts/download_ai_deps.sh to fetch these before building.
 valhalla/
 typeform/
 internal/app/valhalla/
 internal/app/typeform/
 internal/tray/typeform/
+internal/ai/onnx/models/
+internal/ai/onnx/libs/
 
 # Local development environment configuration (not versioned)
 DEV.md

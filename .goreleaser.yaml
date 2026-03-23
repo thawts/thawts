@@ -5,23 +5,28 @@ project_name: thawts
 before:
   hooks:
     - go mod tidy
+    # Download the AI model and native libs (embedded into the binary via -tags with_onnx).
+    # The script detects the current platform automatically.
+    - bash scripts/download_ai_deps.sh
 
 builds:
   - id: thawts
     main: .
     binary: thawts
-    # Inject the version string at build time.
+    # Inject version string and enable on-device AI inference.
     ldflags:
       - -s -w -X main.version={{ .Version }}
-    # Wails requires CGO and native system libraries (WebKit/WebView2).
-    # Cross-compilation is not supported — each platform needs its own
-    # native runner. GoReleaser handles macOS; Linux (amd64 + arm64) and
-    # Windows (amd64) are built by the release-linux / release-windows jobs
-    # in .github/workflows/release.yml and uploaded to the same release.
+    tags:
+      - with_onnx
+    # Wails requires CGO and native system libraries.
+    # Cross-compilation is not supported — each platform needs its own native runner.
+    # GoReleaser handles macOS arm64 (macos-latest runner = Apple Silicon).
+    # Intel Mac users can run the arm64 binary transparently via Rosetta 2.
+    # Linux (amd64 + arm64) and Windows (amd64) are built by the
+    # release-linux / release-windows jobs in .github/workflows/release.yml.
     goos:
       - darwin
     goarch:
-      - amd64
       - arm64
     env:
       - CGO_ENABLED=1
@@ -29,7 +34,6 @@ builds:
 
 # ── macOS notarization ────────────────────────────────────────────────────────
 # TODO (WP-4.3): add notarize section once APPLE_* secrets are configured.
-# GoReleaser v2 sign schema: certificate (base64 p12) + password fields.
 
 archives:
   - id: thawts
@@ -57,9 +61,6 @@ release:
   replace_existing_artifacts: true
 
 # ── Homebrew formula (CLI/TUI binary) ─────────────────────────────────────────
-# Pushes an updated Formula/thawts.rb to the tap repo after each release.
-# Requires HOMEBREW_TAP_TOKEN (PAT with repo write on homebrew-tap) and
-# HOMEBREW_TAP_OWNER to be set as GitHub Actions secrets.
 brews:
   - name: thawts
     repository:

@@ -15,7 +15,6 @@ permissions:
 
 jobs:
   # ── Resolve or create the tag ─────────────────────────────────────────────
-  # Outputs the canonical tag (e.g. v1.2.3) so all build jobs share one value.
   prep:
     name: Prepare
     runs-on: ubuntu-latest
@@ -76,8 +75,14 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      - name: Download AI model and native libs
+        run: bash scripts/download_ai_deps.sh
+
       - name: Run tests
         run: go test ./...
+
+      - name: Run ONNX tests
+        run: go test -tags with_onnx -timeout 120s ./internal/ai/onnx/...
 
       # TODO (WP-4.3): add macOS signing step once APPLE_* secrets are configured.
       - name: Run GoReleaser
@@ -136,10 +141,13 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      - name: Download AI model and native libs
+        run: bash scripts/download_ai_deps.sh
+
       - name: Build binary
         run: |
           VERSION="${{ needs.prep.outputs.tag }}"
-          go build -ldflags="-s -w -X main.version=${VERSION#v}" -o thawts .
+          go build -tags with_onnx -ldflags="-s -w -X main.version=${VERSION#v}" -o thawts .
         env:
           CGO_ENABLED: "1"
 
@@ -152,6 +160,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── Windows native build ──────────────────────────────────────────────────
+  # Note: Windows is built without -tags with_onnx until a Windows embed file
+  # is added (see internal/ai/onnx/embed_windows_amd64.go — TODO).
   release-windows:
     name: Release (Windows amd64)
     needs: [prep, release-macos]

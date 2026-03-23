@@ -6,7 +6,9 @@ require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
+	github.com/daulet/tokenizers v1.26.0
 	github.com/wailsapp/wails/v3 v3.0.0-alpha.74
+	github.com/yalue/onnxruntime_go v1.27.0
 	golang.design/x/hotkey v0.4.1
 	golang.org/x/sys v0.40.0
 	modernc.org/sqlite v1.44.3
