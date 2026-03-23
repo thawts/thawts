@@ -27,11 +27,9 @@ thawts --install
 
 | Action | Shortcut |
 |---|---|
-| Show/hide capture window | `Ctrl+Shift+Space` |
+| Show/hide capture window | `Ctrl+Alt+Space` |
 | Open review | `Cmd+Option+R` (macOS) |
-| Hide window | `Esc` or click away |
-
-The window auto-hides when it loses focus (capture mode only).
+| Hide window | `Esc` or click away (macOS/Linux) / `Esc` or hotkey (Windows) |
 
 ### TUI Mode
 

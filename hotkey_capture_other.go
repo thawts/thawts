@@ -13,7 +13,7 @@ import (
 
 func registerCaptureHotkey(app *thawtsapp.App) {
 	go registerHotkey(
-		[]hotkey.Modifier{hotkey.ModShift, hotkey.ModCtrl},
+		[]hotkey.Modifier{hotkey.ModCtrl, hotkey.ModOption},
 		hotkey.KeySpace,
 		func() { application.InvokeSync(app.ToggleCapture) },
 	)
