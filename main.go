@@ -13,7 +13,6 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
-	"golang.design/x/hotkey"
 
 	thawtsapp "github.com/thawts/thawts/internal/app"
 	"github.com/thawts/thawts/internal/ai"
@@ -159,12 +158,8 @@ func main() {
 	buildMenu(wailsApp, win, app)
 	tray.Init(wailsApp, appIcon, app)
 
-	// Ctrl+Shift+Space → toggle capture mode
-	go registerHotkey(
-		[]hotkey.Modifier{hotkey.ModShift, hotkey.ModCtrl},
-		hotkey.KeySpace,
-		func() { application.InvokeSync(app.ToggleCapture) },
-	)
+	// Ctrl+Shift+Space → toggle capture mode (platform-specific implementation)
+	registerCaptureHotkey(app)
 
 	// Cmd+Option+R → open review mode (macOS only; see hotkey_review_darwin.go)
 	registerReviewHotkey(app)
@@ -217,17 +212,3 @@ func executablePath() (string, error) {
 	return filepath.EvalSymlinks(exe)
 }
 
-func registerHotkey(mods []hotkey.Modifier, key hotkey.Key, fn func()) {
-	hk := hotkey.New(mods, key)
-	if err := hk.Register(); err != nil {
-		log.Printf("WARNING: global hotkey registration failed: %v", err)
-		log.Printf("         Ctrl+Shift+Space will not work. Use the system tray icon or run 'thawts' again to open the capture window.")
-		return
-	}
-	log.Printf("global hotkey Ctrl+Shift+Space registered successfully")
-	for range hk.Keydown() {
-		log.Printf("hotkey keydown received")
-		fn()
-		log.Printf("hotkey handler returned")
-	}
-}
