@@ -1,4 +1,4 @@
-//go:build !windows && !darwin
+//go:build darwin
 
 package main
 
@@ -13,7 +13,7 @@ import (
 
 func registerCaptureHotkey(app *thawtsapp.App) {
 	go registerHotkey(
-		[]hotkey.Modifier{hotkey.ModCtrl, hotkey.ModAlt},
+		[]hotkey.Modifier{hotkey.ModCtrl, hotkey.ModOption},
 		hotkey.KeySpace,
 		func() { application.InvokeSync(app.ToggleCapture) },
 	)
