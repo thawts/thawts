@@ -3,30 +3,13 @@
 package main
 
 import (
-	"log"
-
 	"github.com/wailsapp/wails/v3/pkg/application"
-	"golang.design/x/hotkey"
 
 	thawtsapp "github.com/thawts/thawts/internal/app"
 )
 
-func registerCaptureHotkey(app *thawtsapp.App) {
-	go registerHotkey(
-		[]hotkey.Modifier{hotkey.ModCtrl, hotkey.Mod1}, // Mod1 = Alt on Linux/X11
-		hotkey.KeySpace,
-		func() { application.InvokeSync(app.ToggleCapture) },
-	)
-}
-
-func registerHotkey(mods []hotkey.Modifier, key hotkey.Key, fn func()) {
-	hk := hotkey.New(mods, key)
-	if err := hk.Register(); err != nil {
-		log.Printf("WARNING: global hotkey registration failed: %v", err)
-		return
-	}
-	log.Printf("global hotkey registered successfully")
-	for range hk.Keydown() {
-		fn()
-	}
+func registerCaptureHotkey(app *thawtsapp.App, hotkeyStr string) func(string) {
+	slot := newHotkeySlot(func() { application.InvokeSync(app.ToggleCapture) })
+	slot.update(hotkeyStr)
+	return slot.update
 }

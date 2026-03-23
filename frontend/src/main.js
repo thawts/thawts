@@ -24,6 +24,8 @@ import {
   ExportCSV,
   ImportJSON,
   ImportCSV,
+  GetSettings,
+  SaveSettings,
   Quit,
   RestartApp,
 } from '../bindings/github.com/thawts/thawts/internal/app/app.js';
@@ -43,8 +45,12 @@ let deleteArmedTimer = null; // armed state for keyboard delete (d d)
 let pendingEdit = false;    // set when 'e' is pressed before inspector finishes loading
 let mergeSelectionIds = new Set(); // IDs selected for merge (DELTA-7a)
 let cmdSelectedIndex = -1; // selected index in slash-command palette
+let settingsOpen = false;   // true while settings panel is shown
+let pendingSettings = false; // true when settings requested from braindump mode
+let escOverride = null;      // function to call instead of normal Escape chain
 
 const SLASH_COMMANDS = [
+  { id: 'settings',            label: '/settings',            desc: 'Open settings (hotkeys, startup)' },
   { id: 'export-json',         label: '/export json',         desc: 'Export all thoughts to JSON' },
   { id: 'export-csv',          label: '/export csv',          desc: 'Export all thoughts to CSV' },
   { id: 'import-json',         label: '/import json',         desc: 'Import thoughts from JSON (additive)' },
@@ -61,6 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
   buildApp();
   setupEscHandler({
     getMode:         () => mode,
+    getEscOverride:  () => escOverride,
     getSelectedId:   () => selectedThoughtId,
     deselectThought: () => {
       clearDeleteArmed();
@@ -88,8 +95,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Skip if focus is in the inspector editor — that input handles its own keys.
     if (e.target?.id === 'inspector-content') return;
 
-    // Arrow navigation works regardless of search text.
-    if (reviewFilter !== 'mishap' && reviewFilter !== 'actions') {
+    // Arrow navigation works regardless of search text,
+    // but yields to the slash-command palette when it is open.
+    if (reviewFilter !== 'mishap' && reviewFilter !== 'actions' && !isCmdPaletteVisible()) {
       if (e.key === 'ArrowDown') { e.preventDefault(); navigateThoughts(1); return; }
       if (e.key === 'ArrowUp')   { e.preventDefault(); navigateThoughts(-1); return; }
     }
@@ -160,9 +168,14 @@ function enterReview() {
   document.getElementById('shell').dataset.mode = 'review';
   const gardenArea = document.getElementById('garden-area');
   gardenArea.style.display = 'flex';
-  mountGarden(gardenArea);
   const input = document.getElementById('thought-input');
   if (input) { input.placeholder = 'Search garden…'; setTimeout(() => input.focus(), 50); }
+  if (pendingSettings) {
+    pendingSettings = false;
+    showSettings();
+    return;
+  }
+  mountGarden(gardenArea);
   refreshGarden();
   checkAndShowWellbeingCard();
 }
@@ -368,6 +381,14 @@ async function executeSlashCommand(id) {
   try {
     let result = '';
     switch (id) {
+      case 'settings':
+        if (mode !== 'review') {
+          pendingSettings = true;
+          await ShowReview();
+        } else {
+          showSettings();
+        }
+        return;
       case 'export-json':        result = await ExportJSON(); break;
       case 'export-csv':         result = await ExportCSV(); break;
       case 'import-json':        result = await ImportJSON(false); break;
@@ -1070,6 +1091,216 @@ function handleEditKey() {
     // Inspector is still loading (async GetThought); focus it once it's rendered.
     pendingEdit = true;
   }
+}
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+
+const isMac = navigator.platform.toUpperCase().includes('MAC');
+
+async function showSettings() {
+  settingsOpen = true;
+  escOverride = closeSettings;
+  const gardenArea = document.getElementById('garden-area');
+  gardenArea.style.display = 'flex';
+  gardenArea.innerHTML = `<div id="settings-panel"><div class="settings-loading">Loading…</div></div>`;
+
+  let settings;
+  try {
+    settings = await GetSettings();
+  } catch (e) {
+    gardenArea.innerHTML = `<div id="settings-panel"><p class="settings-error">Failed to load settings: ${escapeHtml(String(e))}</p></div>`;
+    return;
+  }
+  renderSettingsPanel(gardenArea, settings);
+}
+
+function closeSettings() {
+  settingsOpen = false;
+  escOverride = null;
+  const gardenArea = document.getElementById('garden-area');
+  mountGarden(gardenArea);
+  refreshGarden();
+}
+
+function renderSettingsPanel(container, settings) {
+  let captureHotkey = settings.capture_hotkey || (isMac ? 'ctrl+option+space' : 'ctrl+alt+space');
+  let reviewHotkey  = settings.review_hotkey  || (isMac ? 'cmd+option+r' : '');
+
+  const reviewRow = isMac ? `
+    <div class="settings-row">
+      <div class="settings-row-label">
+        <span class="settings-label">Review hotkey</span>
+        <span class="settings-hint">macOS only</span>
+      </div>
+      <div class="hotkey-recorder" id="hotkey-review" tabindex="0" title="Click to record" data-hotkey="${escapeHtml(reviewHotkey)}">${formatHotkey(reviewHotkey)}</div>
+    </div>
+  ` : '';
+
+  container.innerHTML = `
+    <div id="settings-panel">
+      <div class="settings-section">
+        <div class="settings-section-title">Keyboard shortcuts</div>
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <span class="settings-label">Capture hotkey</span>
+          </div>
+          <div class="hotkey-recorder" id="hotkey-capture" tabindex="0" title="Click to record" data-hotkey="${escapeHtml(captureHotkey)}">${formatHotkey(captureHotkey)}</div>
+        </div>
+        ${reviewRow}
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Startup</div>
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <span class="settings-label">Launch at login</span>
+          </div>
+          <label class="settings-toggle">
+            <input type="checkbox" id="launch-at-login" ${settings.launch_at_login ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="settings-footer">
+        <button id="btn-close-settings" class="btn-ghost">Done</button>
+        <span id="settings-status" class="settings-status"></span>
+      </div>
+    </div>
+  `;
+
+  let statusTimer = null;
+  function showStatus(msg, isError) {
+    const statusEl = document.getElementById('settings-status');
+    if (!statusEl) return;
+    clearTimeout(statusTimer);
+    statusEl.textContent = msg;
+    statusEl.className = `settings-status ${isError ? 'error' : 'ok'}`;
+    statusTimer = setTimeout(() => {
+      statusEl.textContent = '';
+      statusEl.className = 'settings-status';
+    }, isError ? 5000 : 3000);
+  }
+
+  async function persist() {
+    try {
+      await SaveSettings({
+        capture_hotkey:  captureHotkey,
+        review_hotkey:   reviewHotkey,
+        launch_at_login: document.getElementById('launch-at-login').checked,
+      });
+      showStatus('Saved.', false);
+    } catch (e) {
+      showStatus(String(e), true);
+    }
+  }
+
+  const recorderOpts = {
+    onRecordingStart: (cancelFn) => { escOverride = cancelFn; },
+    onRecordingEnd:   ()         => { escOverride = closeSettings; },
+  };
+  setupHotkeyRecorder(document.getElementById('hotkey-capture'), (hk) => {
+    captureHotkey = hk;
+    persist();
+  }, recorderOpts);
+  if (isMac) {
+    setupHotkeyRecorder(document.getElementById('hotkey-review'), (hk) => {
+      reviewHotkey = hk;
+      persist();
+    }, recorderOpts);
+  }
+
+  document.getElementById('launch-at-login').addEventListener('change', () => persist());
+  document.getElementById('btn-close-settings').addEventListener('click', closeSettings);
+}
+
+function setupHotkeyRecorder(el, onRecord, { onRecordingStart, onRecordingEnd } = {}) {
+  if (!el) return;
+
+  el.addEventListener('click', startRecording);
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') startRecording(); });
+
+  function startRecording() {
+    const previous = el.dataset.hotkey || '';
+    el.textContent = 'Press a key combo…';
+    el.classList.add('recording');
+    if (onRecordingStart) onRecordingStart(cancel);
+
+    function onKeydown(e) {
+      const modifiers = ['Control', 'Alt', 'Meta', 'Shift'];
+      if (modifiers.includes(e.key)) return; // modifier-only press, keep waiting
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        cancel();
+        return;
+      }
+
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) return; // must have modifier
+
+      const key = codeToKey(e.code);
+      if (!key) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const parts = [];
+      if (e.ctrlKey) parts.push('ctrl');
+      if (e.altKey)  parts.push(isMac ? 'option' : 'alt');
+      if (e.metaKey) parts.push('cmd');
+      if (e.shiftKey) parts.push('shift');
+      parts.push(key);
+
+      const hk = parts.join('+');
+      el.dataset.hotkey = hk;
+      el.textContent = formatHotkey(hk);
+      el.classList.remove('recording');
+      document.removeEventListener('keydown', onKeydown, true);
+      if (onRecordingEnd) onRecordingEnd();
+      onRecord(hk);
+    }
+
+    function cancel() {
+      el.classList.remove('recording');
+      el.textContent = formatHotkey(previous) || '—';
+      document.removeEventListener('keydown', onKeydown, true);
+      if (onRecordingEnd) onRecordingEnd();
+    }
+
+    document.addEventListener('keydown', onKeydown, true);
+  }
+}
+
+function codeToKey(code) {
+  if (code === 'Space') return 'space';
+  if (code.startsWith('Key') && code.length === 4) return code[3].toLowerCase();
+  return null;
+}
+
+function formatHotkey(str) {
+  if (!str) return '—';
+  const parts = str.split('+');
+  if (isMac) {
+    return parts.map(p => {
+      switch (p.toLowerCase()) {
+        case 'ctrl':            return '⌃';
+        case 'option': case 'alt': return '⌥';
+        case 'cmd':             return '⌘';
+        case 'shift':           return '⇧';
+        case 'space':           return 'Space';
+        default:                return p.toUpperCase();
+      }
+    }).join('');
+  }
+  return parts.map(p => {
+    switch (p.toLowerCase()) {
+      case 'ctrl':                    return 'Ctrl';
+      case 'alt': case 'option':      return 'Alt';
+      case 'cmd': case 'win':         return 'Win';
+      case 'shift':                   return 'Shift';
+      case 'space':                   return 'Space';
+      default:                        return p.toUpperCase();
+    }
+  }).join('+');
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────

@@ -145,6 +145,16 @@ export function GetSentimentTrend(days) {
 }
 
 /**
+ * GetSettings returns the current user settings.
+ * @returns {$CancellablePromise<domain$0.Settings>}
+ */
+export function GetSettings() {
+    return $Call.ByID(3892041265).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType5($result);
+    }));
+}
+
+/**
  * GetThought returns a single thought by ID.
  * @param {number} id
  * @returns {$CancellablePromise<domain$0.Thought | null>}
@@ -265,6 +275,15 @@ export function RestartApp() {
 }
 
 /**
+ * SaveSettings persists settings, re-registers hotkeys immediately, and applies launch-at-login.
+ * @param {domain$0.Settings} settings
+ * @returns {$CancellablePromise<void>}
+ */
+export function SaveSettings(settings) {
+    return $Call.ByID(3190960304, settings);
+}
+
+/**
  * SaveThought persists a thought, then classifies it asynchronously.
  * Returns the saved thought immediately (before classification completes).
  * @param {string} content
@@ -307,6 +326,16 @@ export function SemanticSearch(query) {
  */
 export function SetCaptureHeight(h) {
     return $Call.ByID(2362395377, h);
+}
+
+/**
+ * SetHotkeyReloader registers a callback that re-registers global hotkeys at runtime.
+ * Called from main after hotkey slots are created.
+ * @param {any} fn
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetHotkeyReloader(fn) {
+    return $Call.ByID(719193028, fn);
 }
 
 /**
@@ -375,3 +404,4 @@ const $$createType1 = $Create.Nullable($$createType0);
 const $$createType2 = $Create.Array($$createType1);
 const $$createType3 = domain$0.Intent.createFrom;
 const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = domain$0.Settings.createFrom;

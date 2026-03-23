@@ -158,11 +158,20 @@ func main() {
 	buildMenu(wailsApp, win, app)
 	tray.Init(wailsApp, appIcon, app)
 
-	// Ctrl+Shift+Space → toggle capture mode (platform-specific implementation)
-	registerCaptureHotkey(app)
+	// Load user settings so hotkeys can be customised.
+	settings, err := svc.GetSettings()
+	if err != nil {
+		log.Printf("WARNING: could not load settings: %v", err)
+	}
 
-	// Cmd+Option+R → open review mode (macOS only; see hotkey_review_darwin.go)
-	registerReviewHotkey(app)
+	// Register global hotkeys; capture the updater functions for live hotkey changes.
+	captureUpdater := registerCaptureHotkey(app, settings.CaptureHotkey)
+	reviewUpdater  := registerReviewHotkey(app, settings.ReviewHotkey)
+
+	app.SetHotkeyReloader(func(capture, review string) {
+		captureUpdater(capture)
+		reviewUpdater(review)
+	})
 
 	if err := wailsApp.Run(); err != nil {
 		log.Fatal(err)

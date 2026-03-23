@@ -102,6 +102,12 @@ type Storage interface {
 	// records are appended (additive mode).
 	ImportData(payload *ExportPayload, restore bool) error
 
+	// GetSetting returns the stored value for key, or ("", false, nil) when not set.
+	GetSetting(key string) (string, bool, error)
+
+	// SetSetting persists a key-value setting, creating or overwriting.
+	SetSetting(key, value string) error
+
 	// Close releases underlying resources.
 	Close() error
 }

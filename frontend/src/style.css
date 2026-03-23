@@ -826,3 +826,165 @@ html, body {
 
 .btn-clean-toggle:hover { color: var(--text-muted); }
 .btn-clean-toggle.active { color: var(--accent); }
+
+/* ─── Settings panel ─────────────────────────────────────────────────────── */
+
+#settings-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 32px 40px;
+  overflow-y: auto;
+  max-width: 560px;
+}
+
+.settings-loading,
+.settings-error {
+  color: var(--text-muted);
+  font-size: 14px;
+  padding: 20px 0;
+}
+
+.settings-error { color: var(--danger); }
+
+.settings-section {
+  margin-bottom: 32px;
+}
+
+.settings-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-row:last-child { border-bottom: none; }
+
+.settings-row-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-label {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.settings-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Hotkey recorder */
+
+.hotkey-recorder {
+  display: inline-flex;
+  align-items: center;
+  min-width: 120px;
+  padding: 6px 12px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s, background 0.15s;
+  justify-content: center;
+}
+
+.hotkey-recorder:hover {
+  border-color: var(--accent);
+  background: var(--bg-4);
+}
+
+.hotkey-recorder.recording {
+  border-color: var(--accent);
+  background: rgba(85, 136, 255, 0.08);
+  color: var(--text-muted);
+  animation: pulse-border 1s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: var(--accent); }
+  50%       { border-color: rgba(85, 136, 255, 0.3); }
+}
+
+/* Toggle switch */
+
+.settings-toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.settings-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-4);
+  border: 1px solid var(--border-2);
+  border-radius: 11px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 2px;
+  top: 2px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.settings-toggle input:checked + .toggle-slider {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.settings-toggle input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+  background: #fff;
+}
+
+/* Settings footer */
+
+.settings-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  margin-top: auto;
+}
+
+.settings-status {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.settings-status.ok    { color: #64c864; }
+.settings-status.error { color: var(--danger); }

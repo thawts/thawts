@@ -21,11 +21,18 @@
  * @param {() => void}   opts.showCapture
  * @returns {() => void} teardown function (removes the listener)
  */
-export function setupEscHandler({ getMode, getSelectedId, deselectThought, getInputValue, clearInput, focusInput, hideWindow, showCapture }) {
+export function setupEscHandler({ getMode, getSelectedId, deselectThought, getInputValue, clearInput, focusInput, hideWindow, showCapture, getEscOverride }) {
   function handler(e) {
     if (e.key !== 'Escape') return;
     // Let inspector-content handle its own ESC (discard edit).
     if (e.target?.id === 'inspector-content') return;
+
+    // Allow settings or other overlays to intercept ESC.
+    if (getEscOverride) {
+      const override = getEscOverride();
+      if (override) { e.preventDefault(); override(); return; }
+    }
+
     e.preventDefault();
 
     if (getSelectedId() !== null) {

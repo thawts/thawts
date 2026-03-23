@@ -5,7 +5,6 @@ package install
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -39,6 +38,11 @@ func plistContent(execPath string) string {
 `, plistID, execPath)
 }
 
+// Register writes the LaunchAgent plist so the app starts automatically on
+// next login. It intentionally does NOT run launchctl load — calling that
+// from within the already-running app would immediately spawn a second
+// instance (RunAtLoad:true) which would trigger the single-instance handler
+// and switch the UI to capture mode.
 func Register(execPath string) error {
 	path, err := plistPath()
 	if err != nil {
@@ -47,15 +51,7 @@ func Register(execPath string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, []byte(plistContent(execPath)), 0o644); err != nil {
-		return err
-	}
-	// Unload first in case it was already registered, ignore error.
-	_ = exec.Command("launchctl", "unload", path).Run()
-	if err := exec.Command("launchctl", "load", path).Run(); err != nil {
-		return fmt.Errorf("launchctl load: %w", err)
-	}
-	return nil
+	return os.WriteFile(path, []byte(plistContent(execPath)), 0o644)
 }
 
 func Unregister() error {
@@ -63,7 +59,6 @@ func Unregister() error {
 	if err != nil {
 		return err
 	}
-	_ = exec.Command("launchctl", "unload", path).Run()
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}

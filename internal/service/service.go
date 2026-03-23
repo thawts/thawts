@@ -580,6 +580,47 @@ func (s *Service) ImportFromCSV(path string, restore bool) (int, error) {
 	return len(thoughts), nil
 }
 
+// --- Settings ---
+
+// GetSettings returns the current user settings, filling in defaults for any unset keys.
+func (s *Service) GetSettings() (domain.Settings, error) {
+	settings := domain.Settings{
+		CaptureHotkey: defaultCaptureHotkey,
+		ReviewHotkey:  defaultReviewHotkey,
+	}
+	if v, ok, err := s.store.GetSetting("capture_hotkey"); err != nil {
+		return settings, err
+	} else if ok {
+		settings.CaptureHotkey = v
+	}
+	if v, ok, err := s.store.GetSetting("review_hotkey"); err != nil {
+		return settings, err
+	} else if ok {
+		settings.ReviewHotkey = v
+	}
+	if v, ok, err := s.store.GetSetting("launch_at_login"); err != nil {
+		return settings, err
+	} else if ok {
+		settings.LaunchAtLogin = v == "true"
+	}
+	return settings, nil
+}
+
+// SaveSettings persists all settings fields.
+func (s *Service) SaveSettings(settings domain.Settings) error {
+	if err := s.store.SetSetting("capture_hotkey", settings.CaptureHotkey); err != nil {
+		return err
+	}
+	if err := s.store.SetSetting("review_hotkey", settings.ReviewHotkey); err != nil {
+		return err
+	}
+	val := "false"
+	if settings.LaunchAtLogin {
+		val = "true"
+	}
+	return s.store.SetSetting("launch_at_login", val)
+}
+
 // --- Wellbeing ---
 
 // GetSentimentTrend returns the rolling average sentiment score over the last

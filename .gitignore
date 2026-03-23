@@ -4,6 +4,7 @@ node_modules
 frontend/dist
 
 # Compiled binaries
+thawts
 thawts-client
 thawts-client.exe
 bin/

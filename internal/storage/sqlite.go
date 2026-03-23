@@ -98,6 +98,14 @@ func (s *SQLiteStorage) migrate() error {
 		return fmt.Errorf("create intents table: %w", err)
 	}
 
+	// Settings table — key-value store for user preferences.
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS settings (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("create settings table: %w", err)
+	}
+
 	// Wellbeing signals table — one sentiment score per thought.
 	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS wellbeing_signals (
 		id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -674,6 +682,29 @@ func (s *SQLiteStorage) ImportData(payload *ExportPayload, restore bool) error {
 	}
 
 	return tx.Commit()
+}
+
+// GetSetting implements Storage.
+func (s *SQLiteStorage) GetSetting(key string) (string, bool, error) {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return value, true, nil
+}
+
+// SetSetting implements Storage.
+func (s *SQLiteStorage) SetSetting(key, value string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key, value,
+	)
+	return err
 }
 
 // Close implements Storage.

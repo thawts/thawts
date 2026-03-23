@@ -5,6 +5,7 @@
 export {
     CaptureContext,
     Intent,
+    Settings,
     Tag,
     Thought
 } from "./models.js";

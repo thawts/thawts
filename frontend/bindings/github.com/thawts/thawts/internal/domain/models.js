@@ -133,6 +133,59 @@ export class Intent {
 }
 
 /**
+ * Settings holds user-configurable preferences persisted in the database.
+ */
+export class Settings {
+    /**
+     * Creates a new Settings instance.
+     * @param {Partial<Settings>} [$$source = {}] - The source object to create the Settings.
+     */
+    constructor($$source = {}) {
+        if (!("capture_hotkey" in $$source)) {
+            /**
+             * CaptureHotkey is the global hotkey for toggling the capture window,
+             * encoded as a "+" separated string, e.g. "ctrl+option+space".
+             * Supported modifiers: ctrl, alt, option (=alt on macOS), cmd (macOS), shift.
+             * Supported keys: space, a-z. Changes take effect immediately.
+             * @member
+             * @type {string}
+             */
+            this["capture_hotkey"] = "";
+        }
+        if (!("review_hotkey" in $$source)) {
+            /**
+             * ReviewHotkey is the global hotkey for opening review mode (macOS only).
+             * Same format as CaptureHotkey. Changes take effect immediately.
+             * @member
+             * @type {string}
+             */
+            this["review_hotkey"] = "";
+        }
+        if (!("launch_at_login" in $$source)) {
+            /**
+             * LaunchAtLogin controls whether thawts starts automatically on login.
+             * Changes take effect immediately.
+             * @member
+             * @type {boolean}
+             */
+            this["launch_at_login"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new Settings instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {Settings}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new Settings(/** @type {Partial<Settings>} */($$parsedSource));
+    }
+}
+
+/**
  * Tag is a classification label attached to a thought.
  */
 export class Tag {

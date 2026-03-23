@@ -17,6 +17,8 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
+	"github.com/thawts/thawts/internal/domain"
+	"github.com/thawts/thawts/internal/install"
 	"github.com/thawts/thawts/internal/service"
 )
 
@@ -30,11 +32,12 @@ const (
 // all its exported methods are callable from the frontend via generated JS bindings.
 type App struct {
 	*service.Service
-	wailsApp    *application.App
-	window      *application.WebviewWindow
-	isCapturing bool
-	shownAt     time.Time
-	dialogOpen  atomic.Int32 // >0 while a native file dialog is open
+	wailsApp      *application.App
+	window        *application.WebviewWindow
+	isCapturing   bool
+	shownAt       time.Time
+	dialogOpen    atomic.Int32 // >0 while a native file dialog is open
+	reloadHotkeys func(capture, review string)
 }
 
 // NewApp constructs the Wails adapter with its dependencies.
@@ -225,6 +228,45 @@ func (a *App) ImportCSV(restore bool) (string, error) {
 	}
 	a.wailsApp.Event.Emit("thoughts:imported")
 	return fmt.Sprintf("Successfully %s %d thoughts", mode, n), nil
+}
+
+// SetHotkeyReloader registers a callback that re-registers global hotkeys at runtime.
+// Called from main after hotkey slots are created.
+func (a *App) SetHotkeyReloader(fn func(capture, review string)) {
+	a.reloadHotkeys = fn
+}
+
+// GetSettings returns the current user settings.
+func (a *App) GetSettings() (domain.Settings, error) {
+	return a.Service.GetSettings()
+}
+
+// SaveSettings persists settings, re-registers hotkeys immediately, and applies launch-at-login.
+func (a *App) SaveSettings(settings domain.Settings) error {
+	if err := a.Service.SaveSettings(settings); err != nil {
+		return err
+	}
+	if a.reloadHotkeys != nil {
+		a.reloadHotkeys(settings.CaptureHotkey, settings.ReviewHotkey)
+	}
+	if settings.LaunchAtLogin {
+		exe, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("launch at login: %w", err)
+		}
+		exe, err = filepath.EvalSymlinks(exe)
+		if err != nil {
+			return fmt.Errorf("launch at login: %w", err)
+		}
+		if err := install.Register(exe); err != nil {
+			return fmt.Errorf("launch at login: %w", err)
+		}
+	} else {
+		if err := install.Unregister(); err != nil {
+			log.Printf("launch at login unregister: %v", err)
+		}
+	}
+	return nil
 }
 
 // RestartApp launches a fresh copy of the binary and quits the current process.
