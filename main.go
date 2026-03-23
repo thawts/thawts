@@ -106,7 +106,7 @@ func main() {
 			UniqueID: "e1db439e-43e1-4119-880e-37e47522e90d",
 			OnSecondInstanceLaunch: func(_ application.SecondInstanceData) {
 				if app != nil {
-					app.ShowCapture()
+					application.InvokeSync(app.ShowCapture)
 				}
 			},
 		},
@@ -163,7 +163,7 @@ func main() {
 	go registerHotkey(
 		[]hotkey.Modifier{hotkey.ModShift, hotkey.ModCtrl},
 		hotkey.KeySpace,
-		app.ToggleCapture,
+		func() { application.InvokeSync(app.ToggleCapture) },
 	)
 
 	// Cmd+Option+R → open review mode (macOS only; see hotkey_review_darwin.go)

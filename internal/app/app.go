@@ -7,6 +7,7 @@
 package app
 
 import (
+	"log"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -94,6 +95,7 @@ func (a *App) HideWindow() {
 // is centered on screen and shown. Centers using review dimensions first so
 // that expanding to review later only changes the height.
 func (a *App) ToggleCapture() {
+	log.Printf("ToggleCapture called (isCapturing=%v)", a.isCapturing)
 	if a.isCapturing {
 		a.HideWindow()
 		return
