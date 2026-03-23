@@ -7,7 +7,12 @@
 package app
 
 import (
+	"fmt"
 	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -29,6 +34,7 @@ type App struct {
 	window      *application.WebviewWindow
 	isCapturing bool
 	shownAt     time.Time
+	dialogOpen  atomic.Int32 // >0 while a native file dialog is open
 }
 
 // NewApp constructs the Wails adapter with its dependencies.
@@ -43,6 +49,12 @@ func NewApp(wailsApp *application.App, window *application.WebviewWindow, svc *s
 // IsCapturing reports whether the window is currently in capture mode.
 func (a *App) IsCapturing() bool {
 	return a.isCapturing
+}
+
+// IsDialogOpen reports whether a native file dialog is currently open.
+// The focus-loss hide hook must not hide the window while a dialog is open.
+func (a *App) IsDialogOpen() bool {
+	return a.dialogOpen.Load() > 0
 }
 
 // ShouldHideOnFocusLoss reports whether the focus-loss hook should hide the
@@ -117,4 +129,118 @@ func (a *App) ToggleCapture() {
 // SetCaptureHeight resizes the capture window height as the thought list grows.
 func (a *App) SetCaptureHeight(h int) {
 	a.window.SetSize(windowWidth, h)
+}
+
+// promptSaveFile shows a save-file dialog, temporarily disabling always-on-top
+// so the dialog is not obscured by the Thawts window.
+func (a *App) promptSaveFile(d *application.SaveFileDialogStruct) (string, error) {
+	a.window.SetAlwaysOnTop(false)
+	a.dialogOpen.Add(1)
+	path, err := d.PromptForSingleSelection()
+	a.dialogOpen.Add(-1)
+	if a.isCapturing {
+		a.window.SetAlwaysOnTop(true)
+	}
+	return path, err
+}
+
+// promptOpenFile shows an open-file dialog, temporarily disabling always-on-top.
+func (a *App) promptOpenFile(d *application.OpenFileDialogStruct) (string, error) {
+	a.window.SetAlwaysOnTop(false)
+	a.dialogOpen.Add(1)
+	path, err := d.PromptForSingleSelection()
+	a.dialogOpen.Add(-1)
+	if a.isCapturing {
+		a.window.SetAlwaysOnTop(true)
+	}
+	return path, err
+}
+
+// ExportJSON shows a save-file dialog and exports all thoughts to JSON.
+// Returns a human-readable summary or an error message.
+func (a *App) ExportJSON() (string, error) {
+	path, err := a.promptSaveFile(a.wailsApp.Dialog.SaveFile().
+		AddFilter("JSON files", "*.json").
+		SetFilename("thawts-export.json"))
+	if err != nil || path == "" {
+		return "", nil // cancelled
+	}
+	n, err := a.Service.ExportToJSON(path)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Exported %d thoughts → %s", n, filepath.Base(path)), nil
+}
+
+// ExportCSV shows a save-file dialog and exports all thoughts to CSV.
+func (a *App) ExportCSV() (string, error) {
+	path, err := a.promptSaveFile(a.wailsApp.Dialog.SaveFile().
+		AddFilter("CSV files", "*.csv").
+		SetFilename("thawts-export.csv"))
+	if err != nil || path == "" {
+		return "", nil
+	}
+	n, err := a.Service.ExportToCSV(path)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Exported %d thoughts → %s", n, filepath.Base(path)), nil
+}
+
+// ImportJSON shows an open-file dialog and imports thoughts from a JSON file.
+// When restore is true all existing data is deleted before importing.
+func (a *App) ImportJSON(restore bool) (string, error) {
+	path, err := a.promptOpenFile(a.wailsApp.Dialog.OpenFile().
+		AddFilter("JSON files", "*.json"))
+	if err != nil || path == "" {
+		return "", nil
+	}
+	n, err := a.Service.ImportFromJSON(path, restore)
+	if err != nil {
+		return "", err
+	}
+	mode := "added"
+	if restore {
+		mode = "restored"
+	}
+	a.wailsApp.Event.Emit("thoughts:imported")
+	return fmt.Sprintf("Successfully %s %d thoughts", mode, n), nil
+}
+
+// ImportCSV shows an open-file dialog and imports thoughts from a CSV file.
+// When restore is true all existing data is deleted before importing.
+func (a *App) ImportCSV(restore bool) (string, error) {
+	path, err := a.promptOpenFile(a.wailsApp.Dialog.OpenFile().
+		AddFilter("CSV files", "*.csv"))
+	if err != nil || path == "" {
+		return "", nil
+	}
+	n, err := a.Service.ImportFromCSV(path, restore)
+	if err != nil {
+		return "", err
+	}
+	mode := "added"
+	if restore {
+		mode = "restored"
+	}
+	a.wailsApp.Event.Emit("thoughts:imported")
+	return fmt.Sprintf("Successfully %s %d thoughts", mode, n), nil
+}
+
+// RestartApp launches a fresh copy of the binary and quits the current process.
+func (a *App) RestartApp() {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Printf("RestartApp: %v", err)
+		return
+	}
+	cmd := exec.Command(exe, os.Args[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+	if err := cmd.Start(); err != nil {
+		log.Printf("RestartApp start: %v", err)
+		return
+	}
+	a.wailsApp.Quit()
 }

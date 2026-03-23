@@ -55,6 +55,43 @@ export function DismissIntent(intentID) {
 }
 
 /**
+ * ExportCSV shows a save-file dialog and exports all thoughts to CSV.
+ * @returns {$CancellablePromise<string>}
+ */
+export function ExportCSV() {
+    return $Call.ByID(1228792934);
+}
+
+/**
+ * ExportJSON shows a save-file dialog and exports all thoughts to JSON.
+ * Returns a human-readable summary or an error message.
+ * @returns {$CancellablePromise<string>}
+ */
+export function ExportJSON() {
+    return $Call.ByID(2624492816);
+}
+
+/**
+ * ExportToCSV writes thoughts as CSV to path. Tags are pipe-separated in one column.
+ * Returns the number of thoughts exported.
+ * @param {string} path
+ * @returns {$CancellablePromise<number>}
+ */
+export function ExportToCSV(path) {
+    return $Call.ByID(140316005, path);
+}
+
+/**
+ * ExportToJSON writes a full JSON snapshot of all thoughts and intents to path.
+ * Returns the number of thoughts exported.
+ * @param {string} path
+ * @returns {$CancellablePromise<number>}
+ */
+export function ExportToJSON(path) {
+    return $Call.ByID(3529090697, path);
+}
+
+/**
  * FindRelated returns a thought semantically related to text captured more than
  * 24 hours ago. Returns nil (no error) when nothing qualifies.
  * @param {string} text
@@ -127,12 +164,66 @@ export function HideWindow() {
 }
 
 /**
+ * ImportCSV shows an open-file dialog and imports thoughts from a CSV file.
+ * When restore is true all existing data is deleted before importing.
+ * @param {boolean} restore
+ * @returns {$CancellablePromise<string>}
+ */
+export function ImportCSV(restore) {
+    return $Call.ByID(508059031, restore);
+}
+
+/**
+ * ImportFromCSV reads a CSV file from path and imports the thoughts.
+ * Expected header columns (case-insensitive): content, raw_content, created_at,
+ * updated_at, hidden, tags (pipe-separated), window_title, app_name, url.
+ * Only "content" is required. When restore is true existing data is deleted first.
+ * Returns the number of thoughts imported.
+ * @param {string} path
+ * @param {boolean} restore
+ * @returns {$CancellablePromise<number>}
+ */
+export function ImportFromCSV(path, restore) {
+    return $Call.ByID(3479343655, path, restore);
+}
+
+/**
+ * ImportFromJSON reads a JSON snapshot from path and imports it.
+ * When restore is true all existing data is deleted first.
+ * Returns the number of thoughts imported.
+ * @param {string} path
+ * @param {boolean} restore
+ * @returns {$CancellablePromise<number>}
+ */
+export function ImportFromJSON(path, restore) {
+    return $Call.ByID(2767141515, path, restore);
+}
+
+/**
+ * ImportJSON shows an open-file dialog and imports thoughts from a JSON file.
+ * When restore is true all existing data is deleted before importing.
+ * @param {boolean} restore
+ * @returns {$CancellablePromise<string>}
+ */
+export function ImportJSON(restore) {
+    return $Call.ByID(2277596667, restore);
+}
+
+/**
  * IsCapturing reports whether the window is currently in capture mode.
- * Used by the focus-loss hook to decide whether to auto-hide.
  * @returns {$CancellablePromise<boolean>}
  */
 export function IsCapturing() {
     return $Call.ByID(2535118221);
+}
+
+/**
+ * IsDialogOpen reports whether a native file dialog is currently open.
+ * The focus-loss hide hook must not hide the window while a dialog is open.
+ * @returns {$CancellablePromise<boolean>}
+ */
+export function IsDialogOpen() {
+    return $Call.ByID(2677586112);
 }
 
 /**
@@ -163,6 +254,14 @@ export function PrepareCapture() {
  */
 export function Quit() {
     return $Call.ByID(149737679);
+}
+
+/**
+ * RestartApp launches a fresh copy of the binary and quits the current process.
+ * @returns {$CancellablePromise<void>}
+ */
+export function RestartApp() {
+    return $Call.ByID(302275134);
 }
 
 /**
@@ -211,6 +310,17 @@ export function SetCaptureHeight(h) {
 }
 
 /**
+ * ShouldHideOnFocusLoss reports whether the focus-loss hook should hide the
+ * window. Returns false for a short grace period after the window is shown so
+ * that the tray-click or hotkey interaction does not immediately steal focus
+ * back before the window has a chance to become active.
+ * @returns {$CancellablePromise<boolean>}
+ */
+export function ShouldHideOnFocusLoss() {
+    return $Call.ByID(2112871677);
+}
+
+/**
  * ShowCapture switches to capture mode: thin bar, always on top.
  * @returns {$CancellablePromise<void>}
  */
@@ -227,9 +337,10 @@ export function ShowReview() {
 }
 
 /**
- * ToggleCapture shows capture mode via the global hotkey, centering the window.
- * Centers using review dimensions first so that expanding to review later only
- * changes the height — the top-left position stays identical.
+ * ToggleCapture toggles capture mode via the global hotkey.
+ * If the window is already visible in capture mode it is hidden; otherwise it
+ * is centered on screen and shown. Centers using review dimensions first so
+ * that expanding to review later only changes the height.
  * @returns {$CancellablePromise<void>}
  */
 export function ToggleCapture() {

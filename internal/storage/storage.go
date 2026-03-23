@@ -5,7 +5,18 @@
 // touching the rest of the application.
 package storage
 
-import "github.com/thawts/thawts/internal/domain"
+import (
+	"time"
+
+	"github.com/thawts/thawts/internal/domain"
+)
+
+// ExportPayload is a full serialisable snapshot of all thoughts and intents.
+type ExportPayload struct {
+	ExportedAt time.Time        `json:"exported_at"`
+	Thoughts   []*domain.Thought `json:"thoughts"`
+	Intents    []domain.Intent  `json:"intents"`
+}
 
 // Storage is the persistence contract.
 type Storage interface {
@@ -82,6 +93,14 @@ type Storage interface {
 	// GetSentimentTrend returns wellbeing signals for thoughts captured within
 	// the last `days` days, ordered by created_at ascending.
 	GetSentimentTrend(days int) ([]domain.WellbeingSignal, error)
+
+	// ExportData returns a full snapshot of all thoughts (including hidden) and intents.
+	ExportData() (*ExportPayload, error)
+
+	// ImportData inserts thoughts and intents from payload.
+	// When restore is true all existing data is deleted first; otherwise the
+	// records are appended (additive mode).
+	ImportData(payload *ExportPayload, restore bool) error
 
 	// Close releases underlying resources.
 	Close() error

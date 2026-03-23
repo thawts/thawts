@@ -533,6 +533,149 @@ func (s *SQLiteStorage) GetSentimentTrend(days int) ([]domain.WellbeingSignal, e
 	return signals, rows.Err()
 }
 
+// ExportData implements Storage.
+func (s *SQLiteStorage) ExportData() (*ExportPayload, error) {
+	rows, err := s.db.Query(
+		`SELECT id, content, raw_content, window_title, app_name, url, hidden, meta, created_at, updated_at
+		 FROM thoughts ORDER BY created_at ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	thoughts, err := s.scanThoughts(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	intentRows, err := s.db.Query(
+		`SELECT id, thought_id, type, title, date, status, created_at
+		 FROM intents ORDER BY created_at ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer intentRows.Close()
+	intents, err := s.scanIntents(intentRows)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExportPayload{
+		ExportedAt: time.Now().UTC(),
+		Thoughts:   thoughts,
+		Intents:    intents,
+	}, nil
+}
+
+// ImportData implements Storage.
+func (s *SQLiteStorage) ImportData(payload *ExportPayload, restore bool) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if restore {
+		for _, table := range []string{"wellbeing_signals", "intents", "embeddings", "tags", "thoughts"} {
+			if _, err := tx.Exec(`DELETE FROM ` + table); err != nil {
+				return fmt.Errorf("clear %s: %w", table, err)
+			}
+		}
+		// Reset AUTOINCREMENT counters so future inserts start from 1.
+		if _, err := tx.Exec(`DELETE FROM sqlite_sequence WHERE name IN ('thoughts','tags','wellbeing_signals')`); err != nil {
+			// sqlite_sequence may not exist yet – ignore.
+			_ = err
+		}
+	}
+
+	// old-ID → new-ID mapping (used to fix intent.ThoughtID in additive mode).
+	idMap := make(map[int64]int64, len(payload.Thoughts))
+
+	for _, t := range payload.Thoughts {
+		var metaStr *string
+		if len(t.Meta) > 0 {
+			b, _ := json.Marshal(t.Meta)
+			s2 := string(b)
+			metaStr = &s2
+		}
+		hidden := 0
+		if t.Hidden {
+			hidden = 1
+		}
+		createdStr := t.CreatedAt.UTC().Format(timeFormat)
+		updatedStr := t.UpdatedAt.UTC().Format(timeFormat)
+		if updatedStr == "" || t.UpdatedAt.IsZero() {
+			updatedStr = createdStr
+		}
+
+		var res sql.Result
+		if restore && t.ID != 0 {
+			res, err = tx.Exec(
+				`INSERT INTO thoughts (id, content, raw_content, window_title, app_name, url, hidden, meta, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				t.ID, t.Content, t.RawContent,
+				t.Context.WindowTitle, t.Context.AppName, t.Context.URL,
+				hidden, metaStr, createdStr, updatedStr,
+			)
+		} else {
+			res, err = tx.Exec(
+				`INSERT INTO thoughts (content, raw_content, window_title, app_name, url, hidden, meta, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				t.Content, t.RawContent,
+				t.Context.WindowTitle, t.Context.AppName, t.Context.URL,
+				hidden, metaStr, createdStr, updatedStr,
+			)
+		}
+		if err != nil {
+			return fmt.Errorf("import thought: %w", err)
+		}
+		newID, _ := res.LastInsertId()
+		if restore && t.ID != 0 {
+			newID = t.ID
+		}
+		idMap[t.ID] = newID
+
+		for _, tag := range t.Tags {
+			tagCreated := tag.CreatedAt.UTC().Format(timeFormat)
+			if tag.CreatedAt.IsZero() {
+				tagCreated = createdStr
+			}
+			if _, err := tx.Exec(
+				`INSERT INTO tags (thought_id, name, source, confidence, created_at) VALUES (?, ?, ?, ?, ?)`,
+				newID, tag.Name, tag.Source, tag.Confidence, tagCreated,
+			); err != nil {
+				return fmt.Errorf("import tag: %w", err)
+			}
+		}
+	}
+
+	for _, intent := range payload.Intents {
+		newThoughtID, ok := idMap[intent.ThoughtID]
+		if !ok {
+			continue // thought was not imported; skip
+		}
+		var dateStr *string
+		if intent.Date != nil {
+			d := intent.Date.UTC().Format(timeFormat)
+			dateStr = &d
+		}
+		intentID := intent.ID
+		if !restore {
+			intentID = fmt.Sprintf("imp-%d-%s", newThoughtID, intent.ID)
+		}
+		if _, err := tx.Exec(
+			`INSERT OR IGNORE INTO intents (id, thought_id, type, title, date, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			intentID, newThoughtID, intent.Type, intent.Title, dateStr, intent.Status,
+			intent.CreatedAt.UTC().Format(timeFormat),
+		); err != nil {
+			return fmt.Errorf("import intent: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 // Close implements Storage.
 func (s *SQLiteStorage) Close() error {
 	return s.db.Close()

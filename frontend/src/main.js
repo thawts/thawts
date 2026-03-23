@@ -20,6 +20,12 @@ import {
   GetSentimentTrend,
   MergeThoughts,
   CleanText,
+  ExportJSON,
+  ExportCSV,
+  ImportJSON,
+  ImportCSV,
+  Quit,
+  RestartApp,
 } from '../bindings/github.com/thawts/thawts/internal/app/app.js';
 import { Events } from '@wailsio/runtime';
 
@@ -36,6 +42,18 @@ let relatedTimer = null;  // debounce for proactive synthesis (DELTA-3c)
 let deleteArmedTimer = null; // armed state for keyboard delete (d d)
 let pendingEdit = false;    // set when 'e' is pressed before inspector finishes loading
 let mergeSelectionIds = new Set(); // IDs selected for merge (DELTA-7a)
+let cmdSelectedIndex = -1; // selected index in slash-command palette
+
+const SLASH_COMMANDS = [
+  { id: 'export-json',         label: '/export json',         desc: 'Export all thoughts to JSON' },
+  { id: 'export-csv',          label: '/export csv',          desc: 'Export all thoughts to CSV' },
+  { id: 'import-json',         label: '/import json',         desc: 'Import thoughts from JSON (additive)' },
+  { id: 'import-json-restore', label: '/import json restore', desc: 'Import JSON and replace all existing data' },
+  { id: 'import-csv',          label: '/import csv',          desc: 'Import thoughts from CSV (additive)' },
+  { id: 'import-csv-restore',  label: '/import csv restore',  desc: 'Import CSV and replace all existing data' },
+  { id: 'restart',             label: '/restart',             desc: 'Restart the application' },
+  { id: 'quit',                label: '/quit',                desc: 'Quit the application' },
+];
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -91,6 +109,7 @@ Events.On('mishaps:changed', () => { if (mode === 'review') refreshMishapBadge()
 Events.On('intents:changed', () => { if (mode === 'review') refreshIntentsBadge(); });
 Events.On('thoughts:merged', () => { if (mode === 'review') refreshGarden(); });
 Events.On('wellbeing:alert', () => { if (mode === 'review') checkAndShowWellbeingCard(); });
+Events.On('thoughts:imported', () => { if (mode === 'review') refreshGarden(); });
 
 function buildApp() {
   document.getElementById('app').innerHTML = `
@@ -105,6 +124,7 @@ function buildApp() {
           spellcheck="false"
         />
       </div>
+      <div id="cmd-palette" style="display:none" role="listbox"></div>
       <div id="related-hint" style="display:none"></div>
       <div id="garden-area" style="display:none"></div>
     </div>
@@ -124,6 +144,7 @@ function buildApp() {
 function enterBraindump() {
   mode = 'braindump';
   clearDeleteArmed();
+  dismissCmdPalette();
   dismissRelatedHint();
   document.getElementById('shell').dataset.mode = 'braindump';
   document.getElementById('garden-area').style.display = 'none';
@@ -152,6 +173,47 @@ async function onInputKeydown(e) {
   const input = e.target;
   const text = input.value.trim();
 
+  // Slash command palette navigation
+  if (isCmdPaletteVisible()) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveCmdSelection(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveCmdSelection(-1);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      dismissCmdPalette();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const cmds = getFilteredCmds(text);
+      const idx = cmdSelectedIndex >= 0 ? cmdSelectedIndex : (cmds.length === 1 ? 0 : -1);
+      if (idx >= 0 && idx < cmds.length) {
+        input.value = '';
+        dismissCmdPalette();
+        await executeSlashCommand(cmds[idx].id);
+      }
+      return;
+    }
+    if (e.key === 'Tab') {
+      // Autocomplete to the selected / first command label
+      const cmds = getFilteredCmds(text);
+      const idx = cmdSelectedIndex >= 0 ? cmdSelectedIndex : 0;
+      if (cmds[idx]) {
+        e.preventDefault();
+        input.value = cmds[idx].label;
+        updateCmdPalette(cmds[idx].label);
+      }
+      return;
+    }
+  }
+
   if (e.key === 'Enter') {
     e.preventDefault();
     if (mode === 'braindump' || mode === 'review') {
@@ -175,6 +237,13 @@ async function onInputKeydown(e) {
 
 function onInputChange() {
   const val = document.getElementById('thought-input')?.value ?? '';
+
+  // Slash command palette — active in both modes.
+  if (val.startsWith('/')) {
+    updateCmdPalette(val);
+    return; // don't search or show related hint while in command mode
+  }
+  dismissCmdPalette();
 
   if (mode === 'review') {
     clearTimeout(searchTimer);
@@ -221,9 +290,100 @@ function dismissRelatedHint() {
   const el = document.getElementById('related-hint');
   if (el) el.style.display = 'none';
   // Restore normal capture height only if slash suggestions are also gone
-  if (mode === 'braindump') {
+  if (mode === 'braindump' && !isCmdPaletteVisible()) {
     SetCaptureHeight(60);
   }
+}
+
+// ─── Slash command palette ────────────────────────────────────────────────────
+
+function getFilteredCmds(val) {
+  const q = val.toLowerCase().trim();
+  if (!q || q === '/') return SLASH_COMMANDS;
+  return SLASH_COMMANDS.filter(c => c.label.startsWith(q) || c.label.includes(q));
+}
+
+function isCmdPaletteVisible() {
+  const el = document.getElementById('cmd-palette');
+  return el && el.style.display !== 'none';
+}
+
+function updateCmdPalette(val) {
+  const el = document.getElementById('cmd-palette');
+  if (!el) return;
+  const cmds = getFilteredCmds(val);
+  if (!cmds.length) {
+    dismissCmdPalette();
+    return;
+  }
+  // Clamp selection
+  if (cmdSelectedIndex >= cmds.length) cmdSelectedIndex = cmds.length - 1;
+  el.innerHTML = cmds.map((c, i) => `
+    <div class="cmd-item${i === cmdSelectedIndex ? ' cmd-item--selected' : ''}" data-idx="${i}" role="option">
+      <span class="cmd-label">${escapeHtml(c.label)}</span>
+      <span class="cmd-desc">${escapeHtml(c.desc)}</span>
+    </div>
+  `).join('');
+  el.style.display = '';
+  el.querySelectorAll('.cmd-item').forEach(item => {
+    item.addEventListener('click', async () => {
+      const idx = parseInt(item.dataset.idx, 10);
+      document.getElementById('thought-input').value = '';
+      dismissCmdPalette();
+      await executeSlashCommand(cmds[idx].id);
+    });
+  });
+  // Expand capture window to show palette rows (each ~32px)
+  if (mode === 'braindump') {
+    SetCaptureHeight(60 + cmds.length * 36);
+  }
+}
+
+function dismissCmdPalette() {
+  const el = document.getElementById('cmd-palette');
+  if (el) el.style.display = 'none';
+  cmdSelectedIndex = -1;
+  if (mode === 'braindump') SetCaptureHeight(60);
+}
+
+function moveCmdSelection(delta) {
+  const val = document.getElementById('thought-input')?.value ?? '';
+  const cmds = getFilteredCmds(val);
+  if (!cmds.length) return;
+  cmdSelectedIndex = (cmdSelectedIndex + delta + cmds.length) % cmds.length;
+  updateCmdPalette(val);
+}
+
+async function executeSlashCommand(id) {
+  const input = document.getElementById('thought-input');
+  const showResult = (msg, isError) => {
+    if (!msg) return;
+    const el = document.getElementById('related-hint');
+    if (!el) return;
+    el.innerHTML = `<span class="${isError ? 'cmd-error' : 'cmd-ok'}">${escapeHtml(msg)}</span>`;
+    el.style.display = '';
+    if (mode === 'braindump') SetCaptureHeight(88);
+    setTimeout(() => dismissRelatedHint(), isError ? 5000 : 3000);
+  };
+  try {
+    let result = '';
+    switch (id) {
+      case 'export-json':        result = await ExportJSON(); break;
+      case 'export-csv':         result = await ExportCSV(); break;
+      case 'import-json':        result = await ImportJSON(false); break;
+      case 'import-json-restore':result = await ImportJSON(true); break;
+      case 'import-csv':         result = await ImportCSV(false); break;
+      case 'import-csv-restore': result = await ImportCSV(true); break;
+      case 'restart':            RestartApp(); return;
+      case 'quit':               Quit(); return;
+    }
+    showResult(result, false);
+    if (id.startsWith('import') && mode === 'review') await refreshGarden();
+  } catch (err) {
+    console.error('slash command failed:', err);
+    showResult(String(err), true);
+  }
+  if (input) input.focus();
 }
 
 // ─── Garden (review mode) ─────────────────────────────────────────────────────

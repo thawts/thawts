@@ -7,9 +7,12 @@ package service
 
 import (
 	"context"
+	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
+	"os"
 	"os/exec"
 	gort "runtime"
 	"strings"
@@ -395,6 +398,186 @@ func (s *Service) createNativeEvent(intent *domain.Intent) {
 	if err := exec.Command("osascript", "-e", script).Run(); err != nil {
 		log.Printf("createNativeEvent %q: %v", intent.Title, err)
 	}
+}
+
+// --- Wellbeing ---
+
+// --- Import / Export ---
+
+// ExportToJSON writes a full JSON snapshot of all thoughts and intents to path.
+// Returns the number of thoughts exported.
+func (s *Service) ExportToJSON(path string) (int, error) {
+	payload, err := s.store.ExportData()
+	if err != nil {
+		return 0, fmt.Errorf("export: %w", err)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return 0, fmt.Errorf("create file: %w", err)
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return 0, fmt.Errorf("encode json: %w", err)
+	}
+	return len(payload.Thoughts), nil
+}
+
+// ExportToCSV writes thoughts as CSV to path. Tags are pipe-separated in one column.
+// Returns the number of thoughts exported.
+func (s *Service) ExportToCSV(path string) (int, error) {
+	payload, err := s.store.ExportData()
+	if err != nil {
+		return 0, fmt.Errorf("export: %w", err)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return 0, fmt.Errorf("create file: %w", err)
+	}
+	defer f.Close()
+	w := csv.NewWriter(f)
+	defer w.Flush()
+	if err := w.Write([]string{"id", "content", "raw_content", "created_at", "updated_at", "hidden", "tags", "window_title", "app_name", "url"}); err != nil {
+		return 0, err
+	}
+	for _, t := range payload.Thoughts {
+		tagNames := make([]string, len(t.Tags))
+		for i, tag := range t.Tags {
+			tagNames[i] = tag.Name
+		}
+		hidden := "0"
+		if t.Hidden {
+			hidden = "1"
+		}
+		if err := w.Write([]string{
+			fmt.Sprintf("%d", t.ID),
+			t.Content,
+			t.RawContent,
+			t.CreatedAt.UTC().Format(time.RFC3339),
+			t.UpdatedAt.UTC().Format(time.RFC3339),
+			hidden,
+			strings.Join(tagNames, "|"),
+			t.Context.WindowTitle,
+			t.Context.AppName,
+			t.Context.URL,
+		}); err != nil {
+			return 0, err
+		}
+	}
+	return len(payload.Thoughts), nil
+}
+
+// ImportFromJSON reads a JSON snapshot from path and imports it.
+// When restore is true all existing data is deleted first.
+// Returns the number of thoughts imported.
+func (s *Service) ImportFromJSON(path string, restore bool) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("open file: %w", err)
+	}
+	defer f.Close()
+	var payload storage.ExportPayload
+	if err := json.NewDecoder(f).Decode(&payload); err != nil {
+		return 0, fmt.Errorf("decode json: %w", err)
+	}
+	if err := s.store.ImportData(&payload, restore); err != nil {
+		return 0, fmt.Errorf("import: %w", err)
+	}
+	return len(payload.Thoughts), nil
+}
+
+// ImportFromCSV reads a CSV file from path and imports the thoughts.
+// Expected header columns (case-insensitive): content, raw_content, created_at,
+// updated_at, hidden, tags (pipe-separated), window_title, app_name, url.
+// Only "content" is required. When restore is true existing data is deleted first.
+// Returns the number of thoughts imported.
+func (s *Service) ImportFromCSV(path string, restore bool) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("open file: %w", err)
+	}
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	r.TrimLeadingSpace = true
+	headers, err := r.Read()
+	if err != nil {
+		return 0, fmt.Errorf("read csv header: %w", err)
+	}
+	colIdx := make(map[string]int, len(headers))
+	for i, h := range headers {
+		colIdx[strings.ToLower(strings.TrimSpace(h))] = i
+	}
+	if _, ok := colIdx["content"]; !ok {
+		return 0, fmt.Errorf("CSV missing required column 'content'")
+	}
+
+	col := func(row []string, name string) string {
+		i, ok := colIdx[name]
+		if !ok || i >= len(row) {
+			return ""
+		}
+		return strings.TrimSpace(row[i])
+	}
+
+	now := time.Now().UTC()
+	var thoughts []*domain.Thought
+	for {
+		row, err := r.Read()
+		if err != nil {
+			break
+		}
+		content := col(row, "content")
+		if content == "" {
+			continue
+		}
+		rawContent := col(row, "raw_content")
+		if rawContent == "" {
+			rawContent = content
+		}
+		createdAt := now
+		if v := col(row, "created_at"); v != "" {
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				createdAt = t.UTC()
+			}
+		}
+		updatedAt := createdAt
+		if v := col(row, "updated_at"); v != "" {
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				updatedAt = t.UTC()
+			}
+		}
+		hidden := col(row, "hidden") == "1" || strings.EqualFold(col(row, "hidden"), "true")
+		var tags []domain.Tag
+		if tagStr := col(row, "tags"); tagStr != "" {
+			for _, name := range strings.Split(tagStr, "|") {
+				name = strings.TrimSpace(name)
+				if name != "" {
+					tags = append(tags, domain.Tag{Name: name, Source: "import", Confidence: 1.0, CreatedAt: createdAt})
+				}
+			}
+		}
+		thoughts = append(thoughts, &domain.Thought{
+			Content:    content,
+			RawContent: rawContent,
+			Context: domain.CaptureContext{
+				WindowTitle: col(row, "window_title"),
+				AppName:     col(row, "app_name"),
+				URL:         col(row, "url"),
+			},
+			Tags:      tags,
+			Hidden:    hidden,
+			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
+		})
+	}
+
+	payload := &storage.ExportPayload{Thoughts: thoughts}
+	if err := s.store.ImportData(payload, restore); err != nil {
+		return 0, fmt.Errorf("import: %w", err)
+	}
+	return len(thoughts), nil
 }
 
 // --- Wellbeing ---

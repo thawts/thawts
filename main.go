@@ -149,7 +149,7 @@ func main() {
 	// and rely on the hotkey toggle and Esc key instead.
 	if runtime.GOOS != "windows" {
 		win.RegisterHook(events.Common.WindowLostFocus, func(_ *application.WindowEvent) {
-			if app.IsCapturing() {
+			if app.IsCapturing() && !app.IsDialogOpen() {
 				app.HideWindow()
 			}
 		})
