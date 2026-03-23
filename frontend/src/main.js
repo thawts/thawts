@@ -81,9 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (e.key === 'e') { e.preventDefault(); handleEditKey(); }
   }, { capture: true });
 
-  window.addEventListener('blur', () => {
-    if (mode === 'braindump') setTimeout(() => HideWindow(), 200);
-  });
+
 });
 
 Events.On('mode:capture', () => enterBraindump());

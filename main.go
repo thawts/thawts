@@ -226,6 +226,8 @@ func registerHotkey(mods []hotkey.Modifier, key hotkey.Key, fn func()) {
 	}
 	log.Printf("global hotkey Ctrl+Shift+Space registered successfully")
 	for range hk.Keydown() {
+		log.Printf("hotkey keydown received")
 		fn()
+		log.Printf("hotkey handler returned")
 	}
 }
