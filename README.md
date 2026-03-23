@@ -69,6 +69,25 @@ thawts --version    # print version and exit
 
 All data is stored locally at `~/.thawts/thawts.db` (SQLite). Nothing leaves your machine.
 
+### Import / Export
+
+Type `/` in the capture or search input to open the command palette:
+
+| Command | Description |
+|---|---|
+| `/export json` | Export all thoughts to a JSON file |
+| `/export csv` | Export all thoughts to a CSV file |
+| `/import json` | Import thoughts from a JSON file (additive — keeps existing data) |
+| `/import json restore` | Import from JSON and replace all existing data |
+| `/import csv` | Import thoughts from a CSV file (additive) |
+| `/import csv restore` | Import from CSV and replace all existing data |
+| `/restart` | Restart the application |
+| `/quit` | Quit the application |
+
+Use arrow keys to navigate the palette, **Tab** to autocomplete, **Enter** to execute, **Esc** to dismiss.
+
+The JSON format preserves all fields including tags, context metadata, and intents. The CSV format covers the core thought content and is useful for importing from external sources — only a `content` column is required; `created_at`, `tags` (pipe-separated), `raw_content`, `hidden`, `window_title`, `app_name`, and `url` are optional.
+
 ## License
 
 MIT
