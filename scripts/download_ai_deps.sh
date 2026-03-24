@@ -104,9 +104,11 @@ if [[ ! -f "$ORT_LIB_DEST" ]]; then
   tar -xzf "$TMPDIR_ORT/$ORT_ARCHIVE" -C "$TMPDIR_ORT"
   cp "$TMPDIR_ORT/$ORT_LIB_SRC" "$ORT_LIB_DEST"
   # Canonical name used by //go:embed (no platform suffix, one per build machine).
-  cp "$ORT_LIB_DEST" "$LIBS_DIR/libonnxruntime.dylib" 2>/dev/null || \
-    cp "$ORT_LIB_DEST" "$LIBS_DIR/libonnxruntime.so" 2>/dev/null || \
-    cp "$ORT_LIB_DEST" "$LIBS_DIR/onnxruntime.dll" 2>/dev/null || true
+  case "${GOOS}" in
+    darwin)  cp "$ORT_LIB_DEST" "$LIBS_DIR/libonnxruntime.dylib" ;;
+    linux)   cp "$ORT_LIB_DEST" "$LIBS_DIR/libonnxruntime.so" ;;
+    windows) cp "$ORT_LIB_DEST" "$LIBS_DIR/onnxruntime.dll" ;;
+  esac
   echo "  saved: $(basename "$ORT_LIB_DEST")"
 else
   echo "  already exists: $(basename "$ORT_LIB_DEST")"
