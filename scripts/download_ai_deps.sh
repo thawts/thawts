@@ -28,6 +28,8 @@ TOKENIZERS_VERSION="1.26.0"
 HF_MODEL="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 HF_BASE="https://huggingface.co/${HF_MODEL}/resolve/main"
 
+mkdir -p "$MODELS_DIR" "$LIBS_DIR"
+
 echo "==> Platform: ${GOOS}/${GOARCH}"
 echo "==> ONNX Runtime: v${ORT_VERSION}"
 echo "==> Tokenizers:   v${TOKENIZERS_VERSION}"
